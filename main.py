@@ -23,15 +23,17 @@ class ZhaoModel(pl.LightningModule):
         #encoder
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2,2)
-        self.conv2 = nn.Conv2d(6, 512, 5)
-        # todo: how many conv layers are there?
+        self.conv2 = nn.Conv2d(6, 512, 5) # 512 seems too high, but paper describes next layer input shape to be 512
+        # how many layers are should be here? paper does not describe well
 
-        self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6]) # coordaspp first layer dimensions not the same as others
+        self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6])
         self.upsample = nn.Upsample(scale_factor=4)
+
+            # output dimensions of encoder do not match input dimensions of decoder
 
         # elm
         self.elmPooling = nn.AvgPool2d(56)
-        self.elm1 = nn.Linear(16*28*4,1000)
+        self.elm1 = nn.Linear(16*28*4,1000) # dimensions probably not correct because previous dimensions are not correct
         self.elm2 = nn.Linear(1000, 10, bias=False)
 
         # relation
