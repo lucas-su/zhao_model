@@ -1,3 +1,6 @@
+import torch.nn as nn
+import torch.nn.functional as F
+import torch
 
 class CoordASPPConv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation):
@@ -51,9 +54,10 @@ class CoordASPP(nn.Module):
     def __init__(self, in_channels, out_channels, atrous_rates, separable=False):
         super(CoordASPP, self).__init__()
         modules = []
+
         modules.append(
             nn.Sequential(
-                CoordConv(in_channels, out_channels, 1, bias=False),
+                CoordConv(in_channels, out_channels, padding=(1,1), bias=False),
                 nn.BatchNorm2d(out_channels),
                 nn.ReLU(),
             )
@@ -71,7 +75,7 @@ class CoordASPP(nn.Module):
         self.convs = nn.ModuleList(modules)
 
         self.project = nn.Sequential(
-            nn.Conv2d(5 * out_channels, out_channels, kernel_size=1, bias=False),
+            nn.Conv2d(6 * out_channels, out_channels, kernel_size=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(),
             nn.Dropout(0.5),
@@ -221,13 +225,13 @@ class AddCoords(nn.Module):
 
 class CoordConv(nn.Module):
 
-    def __init__(self, in_channels, out_channels, with_r=False, **kwargs):
+    def __init__(self, in_channels, out_channels, with_r=False, kernel_size=3, **kwargs):
         super().__init__()
         self.addcoords = AddCoords(with_r=with_r)
-        in_size = in_channels+2
+        in_size = in_channels + 2
         if with_r:
             in_size += 1
-        self.conv = nn.Conv2d(in_size, out_channels, **kwargs)
+        self.conv = nn.Conv2d(in_size, out_channels, kernel_size=kernel_size, **kwargs)
 
     def forward(self, x):
         ret = self.addcoords(x)
