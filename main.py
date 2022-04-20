@@ -226,7 +226,9 @@ if __name__ == "__main__":
     valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=1)
     test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=1)
 
-    model = ZhaoModel("Zhao", "resnet34", in_channels=3, out_classes=23)
+    train_dataset.__getitem__(1)
+
+    model = ZhaoModel(in_channels=3, out_classes=23)
     summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
     trainer = pl.Trainer(
         gpus=1,

@@ -8,6 +8,7 @@ from PIL import Image
 
 transfer_table = json.load(open('/media/luc/data/transfer_table.json','r'))
 
+
 class sunrgbd(torch.utils.data.Dataset):
     def __init__(self, root,mode,transform=None):
 
@@ -56,6 +57,12 @@ class sunrgbd(torch.utils.data.Dataset):
         else:
             raise ValueError('file loading error: define mode failed')
 
+    def convertlabels(self, mask):
+        for i in transfer_table.keys():
+            mask = np.where(mask == float(i),transfer_table[i],mask)
+        return mask
+
+
     def __len__(self):
         return len(self.filenames)
 
@@ -80,6 +87,8 @@ class sunrgbd(torch.utils.data.Dataset):
         image = np.array(Image.fromarray(sample["image"]).resize((256, 256), Image.LINEAR))
         mask = np.array(Image.fromarray(sample["mask"]).resize((256, 256), Image.NEAREST))
         depth = np.array(Image.fromarray(sample["depth"]).resize((256, 256), Image.NEAREST))
+
+        mask = self.convertlabels(mask)
 
         # convert to other format HWC -> CHW
         sample["image"] = np.moveaxis(image, -1, 0)
