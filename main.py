@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from pprint import pprint
 from torch.utils.data import DataLoader
 
+from torchinfo import summary
+
 import custom_layers
 import sunrgbd
 
@@ -21,39 +23,35 @@ class ZhaoModel(pl.LightningModule):
         #encoder
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2,2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 28 * 28 * 512)
+        self.conv2 = nn.Conv2d(6, 28, 5)
+        # todo: how many conv layers are there?
 
-        self.coordASPP = custom_layers.CoordASPP(28*28*512,28*28*256,[1,2,3,6])
+        self.coordASPP = custom_layers.CoordASPP(28,28,[1,2,3,6]) # coordaspp first layer dimensions not the same as others
         self.upsample = nn.Upsample(scale_factor=4)
 
         # elm
-        self.elmPooling = nn.AvgPool2d(56)
-        self.elm1 = nn.Linear(2*2*10,1000)
+        self.elmPooling = nn.AvgPool2d(56) # included because this is common in ELM but isn't present in paper
+        self.elm1 = nn.Linear(16*28*4,1000)
         self.elm2 = nn.Linear(1000, 10, bias=False)
 
         # relation
-        self.conv3 = nn.Conv2d(112*112*10,112*112*1,3)
+        self.conv3 = nn.Conv2d(10,1,3)
         self.att_w_c = torch.nn.Parameter()
         self.att_b_c = torch.nn.Parameter()
         self.att_w_i = torch.nn.Parameter()
         self.att_b_i = torch.nn.Parameter()
-        self.conv4 = nn.Conv2d(112*112*10*2, 3)
-        self.fc3 = nn.Linear(10*112*112*)
+        # self.conv4 = nn.Conv2d(112*112*10*2, 3) # image says conv layers but table says FC layers
+        self.fc3 = nn.Linear(10*2, 128)
+        self.fc4 = nn.Linear(128, out_classes)
 
-        # self.attention = nn.MultiheadAttention(112*112*1,1)
 
-        # for image segmentation dice loss could be the best first choice
+        # dice loss taken from segmentation_models_pytorch
         self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True)
 
     def encoder(self, x):
         # cnn block
         cnn = self.pool(F.relu(self.conv1(x)))
         cnn = self.pool(F.relu(self.conv2(cnn)))
-        cnn = torch.flatten(cnn, 1)  # flatten all dimensions except batch
-        cnn = F.relu(self.fc1(cnn))
-        cnn = self.fc2(cnn)
 
         # convaspp block
         convaspp = self.coordASPP(cnn)
@@ -64,17 +62,24 @@ class ZhaoModel(pl.LightningModule):
     def decoder(self, x):
         y = torch.add(self.oselm(x), self.relation(x))
         x = torch.multiply(x,y)
-        pass
+        x = self.fc3(x)
+        x = self.fc4(x)
+        return x
 
     def oselm(self, x):
         x = self.elmPooling(x)
-        x = self.elm(x)
+        x = self.elm1(x)
         x = F.leaky_relu(x)
         x = self.elm2(x)
         return x
 
     def attention(self,x,y):
-        x = torch.tanh(torch.multiply(self.att_w_c,torch.concat(x,y))+self.att_b_c)
+        x = torch.tanh(torch.add(torch.multiply(
+                                    self.att_w_c,
+                                    torch.concat(x,y)
+                                    ),
+                                self.att_b_c)
+                        )
         w = torch.softmax(self.att_w_i*x+self.att_b_i,None)
         return w
 
@@ -88,8 +93,8 @@ class ZhaoModel(pl.LightningModule):
         return x
 
     def forward(self, image):
-        # normalize image here
-        image = (image - self.mean) / self.std
+        # normalize image here? - from petmodel
+        # image = (image - self.mean) / self.std
         x = self.encoder(image)
         #upsample?
         mask = self.decoder(x)
@@ -254,12 +259,12 @@ if __name__ == "__main__":
     # valid_dataloader = DataLoader(dataset.val, batch_size=16, shuffle=False, num_workers=1)
     # test_dataloader = DataLoader(dataset.test, batch_size=16, shuffle=False, num_workers=1)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
-    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=1)
+    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=1)
 
-    model = ZhaoModel("Zhao", "resnet34", in_channels=3, out_classes=1)
-
+    model = ZhaoModel("Zhao", "resnet34", in_channels=3, out_classes=23)
+    summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
     trainer = pl.Trainer(
         gpus=1,
         max_epochs=5,
