@@ -23,10 +23,10 @@ class ZhaoModel(pl.LightningModule):
         #encoder
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2,2)
-        self.conv2 = nn.Conv2d(6, 28, 5)
+        self.conv2 = nn.Conv2d(6, 512, 5)
         # todo: how many conv layers are there?
 
-        self.coordASPP = custom_layers.CoordASPP(28,28,[1,2,3,6]) # coordaspp first layer dimensions not the same as others
+        self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6]) # coordaspp first layer dimensions not the same as others
         self.upsample = nn.Upsample(scale_factor=4)
 
         # elm

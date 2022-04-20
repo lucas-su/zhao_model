@@ -37,8 +37,8 @@ class CoordASPPSeparableConv(nn.Sequential):
 class CoordASPPPooling(nn.Sequential):
     def __init__(self, in_channels, out_channels):
         super().__init__(
-            nn.AdaptiveAvgPool2d(1),
-            CoordConv(in_channels, out_channels, kernel_size=1, bias=False),
+            nn.AdaptiveAvgPool2d(28),
+            CoordConv(in_channels, out_channels, bias=False), #removed kernel size 1
             nn.BatchNorm2d(out_channels),
             nn.ReLU(),
         )
