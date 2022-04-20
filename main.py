@@ -17,7 +17,7 @@ import sunrgbd
 
 class ZhaoModel(pl.LightningModule):
 
-    def __init__(self, arch, encoder_name, in_channels, out_classes, activation='leaky_relu', **kwargs):
+    def __init__(self, in_channels, out_classes, **kwargs):
         super().__init__()
 
         #encoder
@@ -205,59 +205,20 @@ if __name__ == "__main__":
     # download data
     root = "/media/luc/data/sunrgbd"
 
-    # init train, val, test sets
-    # dataset = sunrgbd.sunrgbd(root)
-
     train_dataset = sunrgbd.sunrgbd(root, "train")
     valid_dataset = sunrgbd.sunrgbd(root, "valid")
     test_dataset = sunrgbd.sunrgbd(root, "test")
 
 
-    # It is a good practice to check datasets don`t intersects with each other
-    # assert set(dataset.test).isdisjoint(set(dataset.train))
-    # assert set(dataset.test).isdisjoint(set(dataset.val))
-    # assert set(dataset.train).isdisjoint(set(dataset.val))
-
     assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
     assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
     assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
-
-    # for i in range(0,10):
-    #
-    #     sample = train_dataset[i]
-    #     plt.subplot(1, 2, 1)
-    #     plt.imshow(sample["image"].transpose(1, 2, 0))  # for visualization we have to transpose back to HWC
-    #     plt.subplot(1, 2, 2)
-    #     plt.imshow(sample["mask"].squeeze())  # for visualization we have to remove 3rd dimension of mask
-    #     plt.show()
-    #
-    #     sample = valid_dataset[i]
-    #     plt.subplot(1, 2, 1)
-    #     plt.imshow(sample["image"].transpose(1, 2, 0))  # for visualization we have to transpose back to HWC
-    #     plt.subplot(1, 2, 2)
-    #     plt.imshow(sample["mask"].squeeze())  # for visualization we have to remove 3rd dimension of mask
-    #     plt.show()
-    #
-    #     sample = test_dataset[i]
-    #     plt.subplot(1, 2, 1)
-    #     plt.imshow(sample["image"].transpose(1, 2, 0))  # for visualization we have to transpose back to HWC
-    #     plt.subplot(1, 2, 2)
-    #     plt.imshow(sample["mask"].squeeze())  # for visualization we have to remove 3rd dimension of mask
-    #     plt.show()
-
-
-    # print(f"Train size: {len(dataset.train)}")
-    # print(f"Valid size: {len(dataset.val)}")
-    # print(f"Test size: {len(dataset.test)}")
 
     print(f"Train size: {len(train_dataset)}")
     print(f"Valid size: {len(valid_dataset)}")
     print(f"Test size: {len(test_dataset)}")
 
     n_cpu = os.cpu_count()
-    # train_dataloader = DataLoader(dataset.train, batch_size=16, shuffle=True, num_workers=1)
-    # valid_dataloader = DataLoader(dataset.val, batch_size=16, shuffle=False, num_workers=1)
-    # test_dataloader = DataLoader(dataset.test, batch_size=16, shuffle=False, num_workers=1)
 
     train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1)
     valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=1)
