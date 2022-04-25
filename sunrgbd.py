@@ -62,7 +62,6 @@ class sunrgbd(torch.utils.data.Dataset):
             mask = np.where(mask == float(i),transfer_table[i],mask)
         return mask
 
-
     def __len__(self):
         return len(self.filenames)
 

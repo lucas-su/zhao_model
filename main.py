@@ -5,6 +5,8 @@ import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
+from torchvision.models.resnet import ResNet, BasicBlock
 
 from pprint import pprint
 from torch.utils.data import DataLoader
@@ -14,6 +16,23 @@ from torchinfo import summary
 import custom_layers
 import sunrgbd
 
+class MyResNet18(ResNet):
+    def __init__(self):
+        super(MyResNet18, self).__init__(BasicBlock, [2, 2, 2, 2])
+
+    def forward(self, x):
+        # change forward here
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        return x
 
 class ZhaoModel(pl.LightningModule):
 
@@ -21,19 +40,22 @@ class ZhaoModel(pl.LightningModule):
         super().__init__()
 
         #encoder
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2,2)
-        self.conv2 = nn.Conv2d(6, 512, 5) # 512 seems too high, but paper describes next layer input shape to be 512
-        # how many layers are should be here? paper does not describe well
+
+        self.model_conv = MyResNet18()
+        self.model_conv.load_state_dict(torchvision.models.resnet18(pretrained=True).state_dict())
+
+        # self.model_conv = torchvision.models.alexnet(pretrained=True)
+        # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
+        # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
         self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6])
         self.upsample = nn.Upsample(scale_factor=4)
 
-            # output dimensions of encoder do not match input dimensions of decoder
+        self.rescale_conv = nn.Conv2d(256, 10, 3)
 
         # elm
         self.elmPooling = nn.AvgPool2d(56)
-        self.elm1 = nn.Linear(16*28*4,1000) # dimensions probably not correct because previous dimensions are not correct
+        self.elm1 = nn.Linear(16*28*4,1000)
         self.elm2 = nn.Linear(1000, 10, bias=False)
 
         # relation
@@ -52,13 +74,12 @@ class ZhaoModel(pl.LightningModule):
 
     def encoder(self, x):
         # cnn block
-        cnn = self.pool(F.relu(self.conv1(x)))
-        cnn = self.pool(F.relu(self.conv2(cnn)))
+        summary(self.model_conv)
+        cnnblock = self.model_conv(x)
+        coordaspp = self.coordASPP(cnnblock)
 
-        # convaspp block
-        convaspp = self.coordASPP(cnn)
-        encoder = self.upsample(convaspp)
-
+        upsampled = self.upsample(coordaspp)
+        encoder = self.rescale_conv(upsampled)
         return encoder
 
     def decoder(self, x):
