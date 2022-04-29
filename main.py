@@ -266,10 +266,19 @@ if __name__ == "__main__":
 
     model = ZhaoModel(in_channels=3, out_classes=23)
     # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
-    trainer = pl.Trainer(
-        gpus=1,
-        max_epochs=5,
-    )
+
+    if os.path.exists("devmode"):
+        trainer = pl.Trainer(
+            gpus=1,
+            max_epochs=5,
+        )
+    else:
+        trainer = pl.Trainer(
+            gpus=2,
+            max_epochs=10,
+        )
+
+
     print('fit')
     trainer.fit(
         model,
