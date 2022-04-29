@@ -237,8 +237,11 @@ class ZhaoModel(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    # download data
-    root = "/media/luc/data/sunrgbd"
+
+    if os.path.exists("devmode"):
+        root = "/media/luc/data/sunrgbd"
+    else:
+        root = "/home/schootuiterkampl/sunrgbd/"
 
     train_dataset = sunrgbd.sunrgbd(root, "train")
     valid_dataset = sunrgbd.sunrgbd(root, "valid")
