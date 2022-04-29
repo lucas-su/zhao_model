@@ -281,28 +281,30 @@ if __name__ == "__main__":
     test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=False)
     pprint(test_metrics)
 
-    batch = next(iter(test_dataloader))
-    with torch.no_grad():
-        model.eval()
-        logits = model(batch["image"])
-    pr_masks = logits.sigmoid()
+    torch.save(model.state_dict(), '.')
 
-    for image, gt_mask, pr_mask in zip(batch["image"], batch["mask"], pr_masks):
-        plt.figure(figsize=(10, 5))
-
-        plt.subplot(1, 3, 1)
-        plt.imshow(image.numpy().transpose(1, 2, 0))  # convert CHW -> HWC
-        plt.title("Image")
-        plt.axis("off")
-
-        plt.subplot(1, 3, 2)
-        plt.imshow(gt_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
-        plt.title("Ground truth")
-        plt.axis("off")
-
-        plt.subplot(1, 3, 3)
-        plt.imshow(pr_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
-        plt.title("Prediction")
-        plt.axis("off")
-
-        plt.show()
+    # batch = next(iter(test_dataloader))
+    # with torch.no_grad():
+    #     model.eval()
+    #     logits = model(batch["image"])
+    # pr_masks = logits.sigmoid()
+    #
+    # for image, gt_mask, pr_mask in zip(batch["image"], batch["mask"], pr_masks):
+    #     plt.figure(figsize=(10, 5))
+    #
+    #     plt.subplot(1, 3, 1)
+    #     plt.imshow(image.numpy().transpose(1, 2, 0))  # convert CHW -> HWC
+    #     plt.title("Image")
+    #     plt.axis("off")
+    #
+    #     plt.subplot(1, 3, 2)
+    #     plt.imshow(gt_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
+    #     plt.title("Ground truth")
+    #     plt.axis("off")
+    #
+    #     plt.subplot(1, 3, 3)
+    #     plt.imshow(pr_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
+    #     plt.title("Prediction")
+    #     plt.axis("off")
+    #
+    #     plt.show()
