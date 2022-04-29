@@ -116,7 +116,6 @@ class ZhaoModel(pl.LightningModule):
 
     def relation(self,x):
         y = self.conv3(x)
-        # y = torch.sigmoid(y) # no reason for sigmoid, not in paper
         y = torch.tile(y,[10,1,1])
         y = self.attention(x,y)
         y = torch.flatten(y,start_dim=1)
@@ -127,13 +126,11 @@ class ZhaoModel(pl.LightningModule):
         return y
 
     def forward(self, image):
-        # normalize image here? - from petmodel
-        # image = (image - self.mean) / self.std
+
         image = image.float()
         x = self.encoder(image)
 
         mask = self.decoder(x)
-        # mask = self.model(image)
         return mask
 
     def shared_step(self, batch, stage):
