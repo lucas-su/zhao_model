@@ -241,7 +241,7 @@ if __name__ == "__main__":
     if os.path.exists("devmode"):
         root = "/media/luc/data/sunrgbd"
     else:
-        root = "/home/schootuiterkampl/sunrgbd/"
+        root = "/home/schootuiterkampl/sunrgbd"
 
     train_dataset = sunrgbd.sunrgbd(root, "train")
     valid_dataset = sunrgbd.sunrgbd(root, "valid")
