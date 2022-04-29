@@ -18,10 +18,10 @@ import sunrgbd
 
 class MyResNet18(ResNet):
     def __init__(self):
+        #todo look into basicblock shape
         super(MyResNet18, self).__init__(BasicBlock, [2, 2, 2, 2])
 
     def forward(self, x):
-        # change forward here
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -49,48 +49,55 @@ class ZhaoModel(pl.LightningModule):
         # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
         self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6])
-        self.upsample = nn.Upsample(scale_factor=4)
+        self.upsample_encoder = nn.Upsample(scale_factor=4)
 
-        self.rescale_conv = nn.Conv2d(256, 10, 3)
+        self.rescale_conv = nn.Conv2d(256, 10, 3 ,padding="same")
 
         # elm
-        self.elmPooling = nn.AvgPool2d(56)
-        self.elm1 = nn.Linear(16*28*4,1000)
+        self.elmPooling = nn.AvgPool2d(16) # is 56 in paper but changed to 15 to accomodate smaller resnet input shape
+        self.elm1 = nn.Linear(40,1000)
         self.elm2 = nn.Linear(1000, 10, bias=False)
 
         # relation
-        self.conv3 = nn.Conv2d(10,1,3)
-        self.att_w_c = torch.nn.Parameter()
-        self.att_b_c = torch.nn.Parameter()
-        self.att_w_i = torch.nn.Parameter()
-        self.att_b_i = torch.nn.Parameter()
-        # self.conv4 = nn.Conv2d(112*112*10*2, 3) # image says conv layers but table says FC layers
-        self.fc3 = nn.Linear(10*2, 128)
-        self.fc4 = nn.Linear(128, out_classes)
+        self.conv3 = nn.Conv2d(10,1,3, padding="same")
+        self.att_w_c = torch.nn.Parameter(torch.zeros(20,32,32))
+        self.att_b_c = torch.nn.Parameter(torch.ones(20,32,32))
+        self.att_w_i = torch.nn.Parameter(torch.zeros(20,32,32))
+        self.att_b_i = torch.nn.Parameter(torch.ones(20,32,32))
 
+        self.fc3 = nn.Linear(20480, 128) # there's a large dimension change in the paper in the FC layer, it makes most sense to me to flatten first, hence the large input size
+        self.fc4 = nn.Linear(128, 10)
+
+        # decoder after relation and elm
+        self.conv4 = nn.Conv2d(10, 1, 3, padding='same') # to 1 channel for mask output
+        self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
 
         # dice loss taken from segmentation_models_pytorch
         self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True)
 
     def encoder(self, x):
         # cnn block
-        summary(self.model_conv)
+        # summary(self.model_conv)
         cnnblock = self.model_conv(x)
         coordaspp = self.coordASPP(cnnblock)
 
-        upsampled = self.upsample(coordaspp)
+        upsampled = self.upsample_encoder(coordaspp)
         encoder = self.rescale_conv(upsampled)
         return encoder
 
     def decoder(self, x):
-        y = torch.add(self.oselm(x), self.relation(x))
+        oselm = self.oselm(x)
+        relation = self.relation(x)
+        y = torch.add(oselm, relation)
+        y = y.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,y)
-        x = self.fc3(x)
-        x = self.fc4(x)
+        x = self.conv4(x)
+        x = self.upsample_decoder(x)
         return x
 
     def oselm(self, x):
         x = self.elmPooling(x)
+        x = torch.flatten(x,start_dim=1)
         x = self.elm1(x)
         x = F.leaky_relu(x)
         x = self.elm2(x)
@@ -99,27 +106,32 @@ class ZhaoModel(pl.LightningModule):
     def attention(self,x,y):
         x = torch.tanh(torch.add(torch.multiply(
                                     self.att_w_c,
-                                    torch.concat(x,y)
+                                    torch.cat((x,y), dim=1)
                                     ),
                                 self.att_b_c)
                         )
-        w = torch.softmax(self.att_w_i*x+self.att_b_i,None)
+        w = torch.softmax(self.att_w_i*x+self.att_b_i,dim=0)
         return w
 
 
     def relation(self,x):
         y = self.conv3(x)
-        y = torch.sigmoid(y)
-        torch.tile(y,[112,112,10])
+        # y = torch.sigmoid(y) # no reason for sigmoid, not in paper
+        y = torch.tile(y,[10,1,1])
         y = self.attention(x,y)
-        x = torch.multiply(x,y)
-        return x
+        y = torch.flatten(y,start_dim=1)
+        y = self.fc3(y)
+        y = torch.tanh(y)
+        y = self.fc4(y)
+        y = torch.softmax(y, dim=1)
+        return y
 
     def forward(self, image):
         # normalize image here? - from petmodel
         # image = (image - self.mean) / self.std
+        image = image.float()
         x = self.encoder(image)
-        #upsample?
+
         mask = self.decoder(x)
         # mask = self.model(image)
         return mask
@@ -243,14 +255,14 @@ if __name__ == "__main__":
 
     n_cpu = os.cpu_count()
 
-    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=1)
-    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=1)
+    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     train_dataset.__getitem__(1)
 
     model = ZhaoModel(in_channels=3, out_classes=23)
-    summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
+    # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
     trainer = pl.Trainer(
         gpus=1,
         max_epochs=5,
