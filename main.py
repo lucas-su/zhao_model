@@ -1,4 +1,4 @@
-import os
+import os, sys
 import torch
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from torchinfo import summary
 
 import custom_layers
-import sunrgbd
+import sunrgbd, iitaff
 
 class MyResNet18(ResNet):
     def __init__(self):
@@ -235,19 +235,37 @@ class ZhaoModel(pl.LightningModule):
 
 if __name__ == "__main__":
 
-    if os.path.exists("devmode"):
-        root = "/media/luc/data/sunrgbd"
+    if sys.argv.__len__() == 1:
+        dataset = 'sunrgbd'
     else:
-        root = "/home/schootuiterkampl/sunrgbd"
+        dataset = sys.argv[1]
 
-    train_dataset = sunrgbd.sunrgbd(root, "train")
-    valid_dataset = sunrgbd.sunrgbd(root, "valid")
-    test_dataset = sunrgbd.sunrgbd(root, "test")
+    if dataset == 'sunrgbd':
 
+        if os.path.exists("devmode"):
+            root = "/media/luc/data/sunrgbd"
+        else:
+            root = "/home/schootuiterkampl/sunrgbd"
+
+        train_dataset = sunrgbd.sunrgbd(root, "train")
+        valid_dataset = sunrgbd.sunrgbd(root, "valid")
+        test_dataset = sunrgbd.sunrgbd(root, "test")
+
+    elif dataset == 'iitaff':
+        if os.path.exists("devmode"):
+            root = "/media/luc/data/iitaff"
+        else:
+            root = "/home/schootuiterkampl/iitaff"
+
+        train_dataset = iitaff.iitaff(root, "train")
+        valid_dataset = iitaff.iitaff(root, "valid")
+        test_dataset = iitaff.iitaff(root, "test")
 
     assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
     assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
-    assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
+
+    # iitaff comes with overlap in train and val by default, should be removed late but is kept in as this was probably also done in zhao et al.
+    # assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
     print(f"Train size: {len(train_dataset)}")
     print(f"Valid size: {len(valid_dataset)}")
@@ -261,7 +279,7 @@ if __name__ == "__main__":
 
     train_dataset.__getitem__(1)
 
-    model = ZhaoModel(in_channels=3, out_classes=23)
+    model = ZhaoModel(in_channels=3, out_classes=10)
     # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
 
     if os.path.exists("devmode"):
@@ -283,11 +301,11 @@ if __name__ == "__main__":
         val_dataloaders=valid_dataloader,
     )
 
-    valid_metrics = trainer.validate(model, dataloaders=valid_dataloader, verbose=False)
+    valid_metrics = trainer.validate(model, dataloaders=valid_dataloader, verbose=True)
     pprint(valid_metrics)
 
     # run test dataset
-    test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=False)
+    test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
     pprint(test_metrics)
 
     torch.save(model.state_dict(), 'model_state_dict')

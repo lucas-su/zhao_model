@@ -72,9 +72,6 @@ class sunrgbd(torch.utils.data.Dataset):
     def __getitem__(self, idx):
 
         filename = self.filenames[idx]
-        print(filename)
-        print(os.path.join(filename, 'image'))
-        print(self.root)
         walk_im = os.walk(os.path.join(filename, 'image')).__next__()  # returns walk list with root dir and image name
         image_path = os.path.join(walk_im[0], walk_im[2][0])
         walk_de = os.walk(os.path.join(filename, 'depth')).__next__()  # returns walk list with root dir and image name
