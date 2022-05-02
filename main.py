@@ -290,7 +290,7 @@ if __name__ == "__main__":
     test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=False)
     pprint(test_metrics)
 
-    torch.save(model.state_dict(), '.')
+    torch.save(model.state_dict(), 'model_state_dict')
 
     # batch = next(iter(test_dataloader))
     # with torch.no_grad():
