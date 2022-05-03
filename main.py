@@ -224,7 +224,16 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_per_image_iou": per_image_iou,
             f"{stage}_dataset_iou": dataset_iou,
             f"{stage}_none_iou": none_iou,
-            f"{stage}_per_label_iou": per_label_iou
+            f"{stage}_label_0_iou": per_label_iou[0],
+            f"{stage}_label_1_iou": per_label_iou[1],
+            f"{stage}_label_2_iou": per_label_iou[2],
+            f"{stage}_label_3_iou": per_label_iou[3],
+            f"{stage}_label_4_iou": per_label_iou[4],
+            f"{stage}_label_5_iou": per_label_iou[5],
+            f"{stage}_label_6_iou": per_label_iou[6],
+            f"{stage}_label_7_iou": per_label_iou[7],
+            f"{stage}_label_8_iou": per_label_iou[8],
+            f"{stage}_label_9_iou": per_label_iou[9]
         }
 
         self.log_dict(metrics, prog_bar=True)
