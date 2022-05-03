@@ -6,20 +6,25 @@ import segmentation_models_pytorch as smp
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-from torchvision.models.resnet import ResNet, BasicBlock
+from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 
 from pprint import pprint
 from torch.utils.data import DataLoader
+
+import numpy as np
 
 from torchinfo import summary
 
 import custom_layers
 import sunrgbd, iitaff
 
-class MyResNet18(ResNet):
+class MyResNet(ResNet):
     def __init__(self):
-        #todo look into basicblock shape
-        super(MyResNet18, self).__init__(BasicBlock, [2, 2, 2, 2])
+
+        if dcnn == "resnet50":
+            super(MyResNet, self).__init__(Bottleneck, [3, 4, 6, 3]) # resnet50
+        else:
+            super(MyResNet, self).__init__(BasicBlock, [2, 2, 2, 2]) # resnet18
 
     def forward(self, x):
         x = self.conv1(x)
@@ -32,6 +37,7 @@ class MyResNet18(ResNet):
         x = self.layer3(x)
         x = self.layer4(x)
 
+
         return x
 
 class ZhaoModel(pl.LightningModule):
@@ -41,14 +47,21 @@ class ZhaoModel(pl.LightningModule):
 
         #encoder
 
-        self.model_conv = MyResNet18()
-        self.model_conv.load_state_dict(torchvision.models.resnet18(pretrained=True).state_dict())
+        self.model_conv = MyResNet()
+        if dcnn == "resnet50":
+            self.model_conv.load_state_dict(torchvision.models.resnet50(pretrained=True).state_dict())
+        else:
+            self.model_conv.load_state_dict(torchvision.models.resnet18(pretrained=True).state_dict())
 
         # self.model_conv = torchvision.models.alexnet(pretrained=True)
         # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
         # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
-        self.coordASPP = custom_layers.CoordASPP(512,256,[1,2,3,6])
+
+        if dcnn[:6] == 'resnet':
+            self.coordASPP = custom_layers.CoordASPP(self.model_conv.layer4[2].bn3.num_features,256,[1,2,3,6]) # 512 for resnet18, 2048 for resnet50
+        else:
+            raise NotImplementedError # for other models (squeezenet, alexnet etc.)
         self.upsample_encoder = nn.Upsample(scale_factor=4)
 
         self.rescale_conv = nn.Conv2d(256, 10, 3 ,padding="same")
@@ -204,10 +217,14 @@ class ZhaoModel(pl.LightningModule):
         # with "empty" images (images without target class) a large gap could be observed.
         # Empty images influence a lot on per_image_iou and much less on dataset_iou.
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
+        none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
+        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction=None)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
 
         metrics = {
             f"{stage}_per_image_iou": per_image_iou,
             f"{stage}_dataset_iou": dataset_iou,
+            f"{stage}_none_iou": none_iou,
+            f"{stage}_per_label_iou": per_label_iou
         }
 
         self.log_dict(metrics, prog_bar=True)
@@ -237,6 +254,8 @@ class ZhaoModel(pl.LightningModule):
 
 
 if __name__ == "__main__":
+
+    dcnn = "resnet50"
 
     if sys.argv.__len__() == 1:
         dataset = 'sunrgbd'
