@@ -6,6 +6,22 @@ import pickle
 
 from PIL import Image
 
+def to_cat(y, num_classes=None, dtype=float):
+    y = np.array(y, dtype='int')
+    input_shape = y.shape
+    if input_shape and input_shape[-1] == 1 and len(input_shape) > 1:
+        input_shape = tuple(input_shape[:-1])
+    y = y.ravel()
+    if not num_classes:
+        num_classes = np.max(y) + 1
+    n = y.shape[0]
+    categorical = np.zeros((n, num_classes), dtype=dtype)
+    categorical[np.arange(n), y] = 1
+    output_shape = input_shape + (num_classes,)
+    categorical = np.reshape(categorical, output_shape)
+    return categorical
+
+
 class iitaff(torch.utils.data.Dataset):
     def __init__(self, root,mode):
 
@@ -61,9 +77,11 @@ class iitaff(torch.utils.data.Dataset):
         mask = np.array(Image.fromarray(sample["mask"]).resize((256, 256), Image.NEAREST))
         depth = np.array(Image.fromarray(sample["depth"]).resize((256, 256), Image.NEAREST))
 
+        mask = to_cat(mask, 10)
+
         # convert to other format HWC -> CHW
         sample["image"] = np.moveaxis(image, -1, 0)
-        sample["mask"] = np.expand_dims(mask, 0)
+        sample["mask"] =  np.moveaxis(mask, -1, 0)
         sample["depth"] = np.expand_dims(depth, 0)
 
         return sample

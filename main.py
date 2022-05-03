@@ -23,8 +23,11 @@ class MyResNet(ResNet):
 
         if dcnn == "resnet50":
             super(MyResNet, self).__init__(Bottleneck, [3, 4, 6, 3]) # resnet50
-        else:
+        elif dcnn == "resnet18":
             super(MyResNet, self).__init__(BasicBlock, [2, 2, 2, 2]) # resnet18
+        else:
+            raise NotImplementedError
+
 
     def forward(self, x):
         x = self.conv1(x)
@@ -82,11 +85,13 @@ class ZhaoModel(pl.LightningModule):
         self.fc4 = nn.Linear(128, 10)
 
         # decoder after relation and elm
-        self.conv4 = nn.Conv2d(10, 1, 3, padding='same') # to 1 channel for mask output
+        self.conv4 = nn.Conv2d(10, 10, 3, padding='same') # to 10 channel for mask output
         self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
 
+
         # dice loss taken from segmentation_models_pytorch
-        self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True)
+        self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
+        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTICLASS_MODE, from_logits=True, classes=10)
 
     def encoder(self, x):
         # cnn block
@@ -144,6 +149,7 @@ class ZhaoModel(pl.LightningModule):
         x = self.encoder(image)
 
         mask = self.decoder(x)
+        mask = torch.softmax(mask, dim=1)
         return mask
 
     def shared_step(self, batch, stage):
@@ -221,6 +227,7 @@ class ZhaoModel(pl.LightningModule):
         per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction=None)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
 
         metrics = {
+
             f"{stage}_per_image_iou": per_image_iou,
             f"{stage}_dataset_iou": dataset_iou,
             f"{stage}_none_iou": none_iou,
@@ -260,16 +267,18 @@ class ZhaoModel(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=0.0001)
 
 
-
-
 if __name__ == "__main__":
-
-    dcnn = "resnet50"
 
     if sys.argv.__len__() == 1:
         dataset = 'sunrgbd'
     else:
-        dataset = sys.argv[1]
+        dataset = sys.argv[1] # options 'sunrgbd' 'iitaff'
+
+    if sys.argv.__len__() < 3:
+        dcnn = "resnet50"
+    else:
+        dcnn = sys.argv[2] # options 'resnet50' 'resnet18'
+
 
     if dataset == 'sunrgbd':
 
@@ -292,6 +301,9 @@ if __name__ == "__main__":
         valid_dataset = iitaff.iitaff(root, "valid")
         test_dataset = iitaff.iitaff(root, "test")
 
+    else:
+        raise ValueError
+
     assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
     assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
@@ -304,11 +316,14 @@ if __name__ == "__main__":
 
     n_cpu = os.cpu_count()
 
-    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
-    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
-
-    train_dataset.__getitem__(1)
+    if os.path.exists("devmode"):
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=4)
+        test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4)
+    else:
+        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+        test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel(in_channels=3, out_classes=10)
     # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
@@ -320,8 +335,8 @@ if __name__ == "__main__":
         )
     else:
         trainer = pl.Trainer(
-            gpus=2,
-            max_epochs=10,
+            gpus=torch.cuda.device_count(),
+            max_epochs=15,
         )
 
 
@@ -340,29 +355,3 @@ if __name__ == "__main__":
     pprint(test_metrics)
 
     torch.save(model.state_dict(), 'model_state_dict')
-
-    # batch = next(iter(test_dataloader))
-    # with torch.no_grad():
-    #     model.eval()
-    #     logits = model(batch["image"])
-    # pr_masks = logits.sigmoid()
-    #
-    # for image, gt_mask, pr_mask in zip(batch["image"], batch["mask"], pr_masks):
-    #     plt.figure(figsize=(10, 5))
-    #
-    #     plt.subplot(1, 3, 1)
-    #     plt.imshow(image.numpy().transpose(1, 2, 0))  # convert CHW -> HWC
-    #     plt.title("Image")
-    #     plt.axis("off")
-    #
-    #     plt.subplot(1, 3, 2)
-    #     plt.imshow(gt_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
-    #     plt.title("Ground truth")
-    #     plt.axis("off")
-    #
-    #     plt.subplot(1, 3, 3)
-    #     plt.imshow(pr_mask.numpy().squeeze())  # just squeeze classes dim, because we have only one class
-    #     plt.title("Prediction")
-    #     plt.axis("off")
-    #
-    #     plt.show()
