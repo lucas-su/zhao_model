@@ -11,6 +11,7 @@ from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 from pprint import pprint
 from torch.utils.data import DataLoader
 
+
 import numpy as np
 
 from torchinfo import summary
@@ -195,7 +196,7 @@ class ZhaoModel(pl.LightningModule):
         # these values will be aggregated in the end of an epoch
 
         # tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="binary")
-        tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multiclass", num_classes=10)
+        tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel", num_classes=10)
 
 
         return {
@@ -224,10 +225,12 @@ class ZhaoModel(pl.LightningModule):
         # Empty images influence a lot on per_image_iou and much less on dataset_iou.
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
+
         per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction=None)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
 
+        loss = ([x["loss"].item() for x in outputs])
         metrics = {
-
+            f"{stage}_loss": np.mean(loss),
             f"{stage}_per_image_iou": per_image_iou,
             f"{stage}_dataset_iou": dataset_iou,
             f"{stage}_none_iou": none_iou,
@@ -265,6 +268,8 @@ class ZhaoModel(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.0001)
+
+
 
 
 if __name__ == "__main__":
@@ -327,6 +332,7 @@ if __name__ == "__main__":
 
     model = ZhaoModel(in_channels=3, out_classes=10)
     # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
+
 
     if os.path.exists("devmode"):
         trainer = pl.Trainer(

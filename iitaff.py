@@ -39,6 +39,10 @@ class iitaff(torch.utils.data.Dataset):
         test_filenames.remove("")
         val_filenames.remove("")
 
+        for val_file in val_filenames:
+            if val_file in train_filenames:
+                train_filenames.remove(val_file)
+
         if mode == 'train':
             self.filenames = train_filenames
         elif mode == 'test':
@@ -55,6 +59,7 @@ class iitaff(torch.utils.data.Dataset):
     def __getitem__(self, idx):
 
         filename = self.filenames[idx]
+
         image_path = f'{self.root}/rgb/{filename}'
         depth_path = f'{self.root}/deep/{filename[:-4]}.txt'
         mask_path = f'{self.root}/affordances_labels/{filename[:-4]}.txt'
