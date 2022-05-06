@@ -201,7 +201,7 @@ class ZhaoModel(pl.LightningModule):
         # class weights are total pixel frequencies in dataset
         class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
 
-        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
+        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights)) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)], axis=0)
 
         metrics = {
             f"{stage}_loss": np.mean(loss),

@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
     # with Pool(16) as p:
     #     p.map(dtest_testdataset, list(range(valid_dataset.__len__())))
+    ## Counter doesn't work well in parallel
     print(test_dataset.__len__())
     for j in list(range(test_dataset.__len__())):
         if j % 500 == 0:
