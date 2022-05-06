@@ -82,6 +82,7 @@ class iitaff(torch.utils.data.Dataset):
         mask = np.array(Image.fromarray(sample["mask"]).resize((256, 256), Image.NEAREST))
         depth = np.array(Image.fromarray(sample["depth"]).resize((256, 256), Image.NEAREST))
 
+
         mask = to_cat(mask, 10)
 
         # convert to other format HWC -> CHW

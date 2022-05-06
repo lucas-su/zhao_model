@@ -198,7 +198,10 @@ class ZhaoModel(pl.LightningModule):
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
 
-        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted")) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
+        # class weights are total pixel frequencies in dataset
+        class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
+
+        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
 
         metrics = {
             f"{stage}_loss": np.mean(loss),
@@ -325,4 +328,4 @@ if __name__ == "__main__":
     test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
     pprint(test_metrics)
 
-    torch.save(model.state_dict(), 'model_state_dict')
+    torch.save(model.state_dict(), f'{dataset}_{dcnn}_model_state_dict')

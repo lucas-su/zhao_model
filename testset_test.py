@@ -1,13 +1,11 @@
 from multiprocessing import Pool
 import iitaff, os
 import numpy as np
+from collections import Counter
 
 def dtest_testdataset(j):
-    global i
-    if np.isin(i, valid_dataset.__getitem__(j)['mask']):
-        return 1
-    else:
-        return 0
+    global c
+    c.update(valid_dataset.__getitem__(j)['mask'].flatten())
 
 if __name__ == "__main__":
     if os.path.exists("devmode"):
@@ -20,13 +18,72 @@ if __name__ == "__main__":
     test_dataset = iitaff.iitaff(root, "test")
     n_cpu = os.cpu_count()
 
-    assert train_dataset.__getitem__(0)['mask'].shape[0] == 1 # turn off to_cat in data file
+    assert train_dataset.__getitem__(0)['mask'].shape[0] > 10 # turn off to_cat in data file
 
-    for i in range(10):
-        with Pool(16) as p:
-            result = p.map(dtest_testdataset, list(range(valid_dataset.__len__())))
-        print(f"key {i} has count {sum(result)}")
+    c = Counter()
 
+    # with Pool(16) as p:
+    #     p.map(dtest_testdataset, list(range(valid_dataset.__len__())))
+    print(test_dataset.__len__())
+    for j in list(range(test_dataset.__len__())):
+        if j % 500 == 0:
+            print(j)
+        c.update(test_dataset.__getitem__(j)['mask'].flatten())
+    print(c.items())
+
+# label counts:
+
+# train
+# (0.0, 242845023)
+# (1.0, 15382425)
+# (2.0, 670580)
+# (3.0, 9332078)
+# (4.0, 1060225)
+# (5.0, 7407467)
+# (6.0, 1622429)
+# (7.0, 1111025)
+# (8.0, 1314111)
+# (9.0, 8727149)
+
+# val:
+# (0.0, 97639810)
+# (1.0, 6141107)
+# (2.0, 269611)
+# (3.0, 3678676)
+# (4.0, 386657)
+# (5.0, 2727832)
+# (6.0, 574402)
+# (7.0, 422488)
+# (8.0, 500451)
+# (9.0, 3461078)
+
+# test
+# (0.0, 145840755)
+# (1.0, 9161842)
+# (2.0, 326314)
+# (3.0, 6368899)
+# (4.0, 773987)
+# (5.0, 4096654)
+# (6.0, 707461)
+# (7.0, 696079)
+# (8.0, 634975)
+# (9.0, 5128970)
+
+# total:
+# (0.0, 486325588)
+# (1.0, 30685374)
+# (2.0, 1266505)
+# (3.0, 19379653)
+# (4.0, 2220869)
+# (5.0, 14231953)
+# (6.0, 2904292)
+# (7.0, 2229592)
+# (8.0, 2449537)
+# (9.0, 17317197)
+
+
+
+# document counts:
 # test
 # key 0 has count 2651
 # key 1 has count 1138
