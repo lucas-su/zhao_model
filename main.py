@@ -39,7 +39,6 @@ class MyResNet(ResNet):
         x = self.layer3(x)
         x = self.layer4(x)
 
-
         return x
 
 class ZhaoModel(pl.LightningModule):
@@ -183,10 +182,10 @@ class ZhaoModel(pl.LightningModule):
 
     def shared_epoch_end(self, outputs, stage):
         # aggregate step metics
-        tp = torch.cat([x["tp"] for x in outputs])
-        fp = torch.cat([x["fp"] for x in outputs])
-        fn = torch.cat([x["fn"] for x in outputs])
-        tn = torch.cat([x["tn"] for x in outputs])
+        tp = torch.cat([x["tp"] for x in outputs]).long()
+        fp = torch.cat([x["fp"] for x in outputs]).long()
+        fn = torch.cat([x["fn"] for x in outputs]).long()
+        tn = torch.cat([x["tn"] for x in outputs]).long()
         loss = ([x["loss"].item() for x in outputs])
 
         # per image IoU means that we first calculate IoU score for each image
@@ -198,38 +197,57 @@ class ZhaoModel(pl.LightningModule):
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
 
-        # class weights are total pixel frequencies in dataset
-        class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
+        # total pixel frequencies in dataset
+        # class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
 
+        # relative frequencies in dataset
+        class_weights = [0.83992525, 0.05299623, 0.00218736, 0.03347029, 0.00383563, 0.02457978, 0.00501596, 0.00385069, 0.00423056, 0.02990826]
 
         per_label_iou_weighted = [smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
         per_label_iou_none = [np.mean(list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none").cpu())) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
 
+        total_fbeta = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
+        per_label_fbeta_weighted = [smp.metrics.fbeta_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for
+            tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
+        # per_label_fbeta_none = [np.mean(list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none").cpu())) for
+        #                       tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
+
         metrics = {
             f"{stage}_loss": np.mean(loss),
-            f"{stage}_per_image_iou": per_image_iou,
-            f"{stage}_dataset_iou": dataset_iou,
-            f"{stage}_none_iou": none_iou,
-            f"{stage}_label_0_iou_none": per_label_iou_none[0],
-            f"{stage}_label_1_iou_none": per_label_iou_none[1],
-            f"{stage}_label_2_iou_none": per_label_iou_none[2],
-            f"{stage}_label_3_iou_none": per_label_iou_none[3],
-            f"{stage}_label_4_iou_none": per_label_iou_none[4],
-            f"{stage}_label_5_iou_none": per_label_iou_none[5],
-            f"{stage}_label_6_iou_none": per_label_iou_none[6],
-            f"{stage}_label_7_iou_none": per_label_iou_none[7],
-            f"{stage}_label_8_iou_none": per_label_iou_none[8],
-            f"{stage}_label_9_iou_none": per_label_iou_none[9],
-            f"{stage}_label_0_iou_weighted": per_label_iou_weighted[0],
-            f"{stage}_label_1_iou_weighted": per_label_iou_weighted[1],
-            f"{stage}_label_2_iou_weighted": per_label_iou_weighted[2],
-            f"{stage}_label_3_iou_weighted": per_label_iou_weighted[3],
-            f"{stage}_label_4_iou_weighted": per_label_iou_weighted[4],
-            f"{stage}_label_5_iou_weighted": per_label_iou_weighted[5],
-            f"{stage}_label_6_iou_weighted": per_label_iou_weighted[6],
-            f"{stage}_label_7_iou_weighted": per_label_iou_weighted[7],
-            f"{stage}_label_8_iou_weighted": per_label_iou_weighted[8],
-            f"{stage}_label_9_iou_weighted": per_label_iou_weighted[9]
+            f"{stage}_iou_per_image": per_image_iou,
+            f"{stage}_iou_dataset": dataset_iou,
+            f"{stage}_iou_none": none_iou,
+            f"{stage}_fbeta_none": total_fbeta,
+            f"{stage}_fbeta_weighted_label_0": per_label_fbeta_weighted[0],
+            f"{stage}_fbeta_weighted_label_1": per_label_fbeta_weighted[1],
+            f"{stage}_fbeta_weighted_label_2": per_label_fbeta_weighted[2],
+            f"{stage}_fbeta_weighted_label_3": per_label_fbeta_weighted[3],
+            f"{stage}_fbeta_weighted_label_4": per_label_fbeta_weighted[4],
+            f"{stage}_fbeta_weighted_label_5": per_label_fbeta_weighted[5],
+            f"{stage}_fbeta_weighted_label_6": per_label_fbeta_weighted[6],
+            f"{stage}_fbeta_weighted_label_7": per_label_fbeta_weighted[7],
+            f"{stage}_fbeta_weighted_label_8": per_label_fbeta_weighted[8],
+            f"{stage}_fbeta_weighted_label_9": per_label_fbeta_weighted[9],
+            f"{stage}_iou_none_label_0": per_label_iou_none[0],
+            f"{stage}_iou_none_label_1": per_label_iou_none[1],
+            f"{stage}_iou_none_label_2": per_label_iou_none[2],
+            f"{stage}_iou_none_label_3": per_label_iou_none[3],
+            f"{stage}_iou_none_label_4": per_label_iou_none[4],
+            f"{stage}_iou_none_label_5": per_label_iou_none[5],
+            f"{stage}_iou_none_label_6": per_label_iou_none[6],
+            f"{stage}_iou_none_label_7": per_label_iou_none[7],
+            f"{stage}_iou_none_label_8": per_label_iou_none[8],
+            f"{stage}_iou_none_label_9": per_label_iou_none[9],
+            f"{stage}_iou_weighted_label_0": per_label_iou_weighted[0],
+            f"{stage}_iou_weighted_label_1": per_label_iou_weighted[1],
+            f"{stage}_iou_weighted_label_2": per_label_iou_weighted[2],
+            f"{stage}_iou_weighted_label_3": per_label_iou_weighted[3],
+            f"{stage}_iou_weighted_label_4": per_label_iou_weighted[4],
+            f"{stage}_iou_weighted_label_5": per_label_iou_weighted[5],
+            f"{stage}_iou_weighted_label_6": per_label_iou_weighted[6],
+            f"{stage}_iou_weighted_label_7": per_label_iou_weighted[7],
+            f"{stage}_iou_weighted_label_8": per_label_iou_weighted[8],
+            f"{stage}_iou_weighted_label_9": per_label_iou_weighted[9]
         }
 
         self.log_dict(metrics, prog_bar=True)
