@@ -202,24 +202,34 @@ class ZhaoModel(pl.LightningModule):
         class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
 
 
-        per_label_iou = [smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
-        # per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none")) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)], axis=0)
+        per_label_iou_weighted = [smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
+        per_label_iou_none = [np.mean(list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none").cpu())) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
 
         metrics = {
             f"{stage}_loss": np.mean(loss),
             f"{stage}_per_image_iou": per_image_iou,
             f"{stage}_dataset_iou": dataset_iou,
             f"{stage}_none_iou": none_iou,
-            f"{stage}_label_0_iou": per_label_iou[0],
-            f"{stage}_label_1_iou": per_label_iou[1],
-            f"{stage}_label_2_iou": per_label_iou[2],
-            f"{stage}_label_3_iou": per_label_iou[3],
-            f"{stage}_label_4_iou": per_label_iou[4],
-            f"{stage}_label_5_iou": per_label_iou[5],
-            f"{stage}_label_6_iou": per_label_iou[6],
-            f"{stage}_label_7_iou": per_label_iou[7],
-            f"{stage}_label_8_iou": per_label_iou[8],
-            f"{stage}_label_9_iou": per_label_iou[9]
+            f"{stage}_label_0_iou_none": per_label_iou_none[0],
+            f"{stage}_label_1_iou_none": per_label_iou_none[1],
+            f"{stage}_label_2_iou_none": per_label_iou_none[2],
+            f"{stage}_label_3_iou_none": per_label_iou_none[3],
+            f"{stage}_label_4_iou_none": per_label_iou_none[4],
+            f"{stage}_label_5_iou_none": per_label_iou_none[5],
+            f"{stage}_label_6_iou_none": per_label_iou_none[6],
+            f"{stage}_label_7_iou_none": per_label_iou_none[7],
+            f"{stage}_label_8_iou_none": per_label_iou_none[8],
+            f"{stage}_label_9_iou_none": per_label_iou_none[9],
+            f"{stage}_label_0_iou_weighted": per_label_iou_weighted[0],
+            f"{stage}_label_1_iou_weighted": per_label_iou_weighted[1],
+            f"{stage}_label_2_iou_weighted": per_label_iou_weighted[2],
+            f"{stage}_label_3_iou_weighted": per_label_iou_weighted[3],
+            f"{stage}_label_4_iou_weighted": per_label_iou_weighted[4],
+            f"{stage}_label_5_iou_weighted": per_label_iou_weighted[5],
+            f"{stage}_label_6_iou_weighted": per_label_iou_weighted[6],
+            f"{stage}_label_7_iou_weighted": per_label_iou_weighted[7],
+            f"{stage}_label_8_iou_weighted": per_label_iou_weighted[8],
+            f"{stage}_label_9_iou_weighted": per_label_iou_weighted[9]
         }
 
         self.log_dict(metrics, prog_bar=True)
