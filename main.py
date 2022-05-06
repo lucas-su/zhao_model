@@ -10,8 +10,6 @@ from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 
 from pprint import pprint
 from torch.utils.data import DataLoader
-
-
 import numpy as np
 
 from torchinfo import summary
@@ -50,7 +48,6 @@ class ZhaoModel(pl.LightningModule):
         super().__init__()
 
         #encoder
-
         self.model_conv = MyResNet()
         if dcnn == "resnet50":
             self.model_conv.load_state_dict(torchvision.models.resnet50(pretrained=True).state_dict())
@@ -132,7 +129,6 @@ class ZhaoModel(pl.LightningModule):
         w = torch.softmax(self.att_w_i*x+self.att_b_i,dim=0)
         return w
 
-
     def relation(self,x):
         y = self.conv3(x)
         y = torch.tile(y,[10,1,1])
@@ -160,44 +156,22 @@ class ZhaoModel(pl.LightningModule):
         # if you work with grayscale images, expand channels dim to have [batch_size, 1, height, width]
         assert image.ndim == 4
 
-        # Check that image dimensions are divisible by 32,
-        # encoder and decoder connected by `skip connections` and usually encoder have 5 stages of
-        # downsampling by factor 2 (2 ^ 5 = 32); e.g. if we have image with shape 65x65 we will have
-        # following shapes of features in encoder and decoder: 84, 42, 21, 10, 5 -> 5, 10, 20, 40, 80
-        # and we will get an error trying to concat these features
         h, w = image.shape[2:]
         assert h % 32 == 0 and w % 32 == 0
 
         mask = batch["mask"]
-
-        # Shape of the mask should be [batch_size, num_classes, height, width]
-        # for binary segmentation num_classes = 1
-        assert mask.ndim == 4
-
-        # Check that mask values in between 0 and 1, NOT 0 and 255 for binary segmentation
-        # assert mask.max() <= 1.0 and mask.min() >= 0
 
         logits_mask = self.forward(image)
 
         # Predicted mask contains logits, and loss_fn param `from_logits` is set to True
         loss = self.loss_fn(logits_mask, mask)
 
-        # Lets compute metrics for some threshold
-        # first convert mask values to probabilities, then
-        # apply thresholding
+
         prob_mask = logits_mask.sigmoid()
         pred_mask = (prob_mask > 0.5).float()
 
-        # We will compute IoU metric by two ways
-        #   1. dataset-wise
-        #   2. image-wise
-        # but for now we just compute true positive, false positive, false negative and
-        # true negative 'pixels' for each image and class
-        # these values will be aggregated in the end of an epoch
-
         # tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="binary")
         tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel", num_classes=10)
-
 
         return {
             "loss": loss,
@@ -213,22 +187,19 @@ class ZhaoModel(pl.LightningModule):
         fp = torch.cat([x["fp"] for x in outputs])
         fn = torch.cat([x["fn"] for x in outputs])
         tn = torch.cat([x["tn"] for x in outputs])
+        loss = ([x["loss"].item() for x in outputs])
 
         # per image IoU means that we first calculate IoU score for each image
         # and then compute mean over these scores
         per_image_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro-imagewise")
 
-        # dataset IoU means that we aggregate intersection and union over whole dataset
-        # and then compute IoU score. The difference between dataset_iou and per_image_iou scores
-        # in this particular case will not be much, however for dataset
-        # with "empty" images (images without target class) a large gap could be observed.
-        # Empty images influence a lot on per_image_iou and much less on dataset_iou.
+        # aggregate intersection and union over whole dataset and then compute IoU score.
+        # images without some target influence per_image_iou more than dataset_iou.
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
 
-        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction=None)) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
+        per_label_iou = np.mean([list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted")) for tp_i, fp_i, fn_i, tn_i in zip(tp, fp, fn, tn)], axis=0)
 
-        loss = ([x["loss"].item() for x in outputs])
         metrics = {
             f"{stage}_loss": np.mean(loss),
             f"{stage}_per_image_iou": per_image_iou,
@@ -311,9 +282,7 @@ if __name__ == "__main__":
 
     assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
     assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
-
-    # iitaff comes with overlap in train and val by default, should be removed late but is kept in as this was probably also done in zhao et al.
-    # assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
+    assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
     print(f"Train size: {len(train_dataset)}")
     print(f"Valid size: {len(valid_dataset)}")
@@ -331,8 +300,6 @@ if __name__ == "__main__":
         test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel(in_channels=3, out_classes=10)
-    # summary(model, input_size=(train_dataloader.batch_size, 3, 256, 256))
-
 
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
@@ -345,8 +312,6 @@ if __name__ == "__main__":
             max_epochs=15,
         )
 
-
-    print('fit')
     trainer.fit(
         model,
         train_dataloaders=train_dataloader,
