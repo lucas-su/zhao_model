@@ -87,8 +87,8 @@ class ZhaoModel(pl.LightningModule):
 
 
         # dice loss taken from segmentation_models_pytorch
-        self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
-        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTICLASS_MODE, from_logits=True, classes=10)
+        # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
+        self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
 
     def encoder(self, x):
         # cnn block
@@ -188,14 +188,11 @@ class ZhaoModel(pl.LightningModule):
         tn = torch.cat([x["tn"] for x in outputs]).long()
         loss = ([x["loss"].item() for x in outputs])
 
-        # per image IoU means that we first calculate IoU score for each image
-        # and then compute mean over these scores
-        per_image_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro-imagewise")
-
         # aggregate intersection and union over whole dataset and then compute IoU score.
         # images without some target influence per_image_iou more than dataset_iou.
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
+
 
         # total pixel frequencies in dataset
         # class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
@@ -203,21 +200,27 @@ class ZhaoModel(pl.LightningModule):
         # relative frequencies in dataset
         class_weights = [0.83992525, 0.05299623, 0.00218736, 0.03347029, 0.00383563, 0.02457978, 0.00501596, 0.00385069, 0.00423056, 0.02990826]
 
-        per_label_iou_weighted = [smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
-        per_label_iou_none = [np.mean(list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none").cpu())) for tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
+        # per_label_iou_none = [np.mean(list(i)) for i in none_iou.T.cpu()]
 
-        total_fbeta = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
-        per_label_fbeta_weighted = [smp.metrics.fbeta_score(tp_i, fp_i, fn_i, tn_i, reduction="weighted", class_weights=class_weights) for
-            tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
-        # per_label_fbeta_none = [np.mean(list(smp.metrics.iou_score(tp_i, fp_i, fn_i, tn_i, reduction="none").cpu())) for
-        #                       tp_i, fp_i, fn_i, tn_i in zip(tp.T, fp.T, fn.T, tn.T)]
+        tp = tp.sum(0)
+        fp = fp.sum(0)
+        fn = fn.sum(0)
+        tn = tn.sum(0)
+        beta = 1
+        beta_tp = (1 + beta ** 2) * tp
+        beta_fn = (beta ** 2) * fn
+        score = beta_tp / (beta_tp + beta_fn + fp)
+        class_weights = torch.tensor(class_weights).to(tp.device)
+        per_label_fbeta_weighted = (score * class_weights)
 
+        per_label_fbeta_none = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
+        per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
+        fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
         metrics = {
             f"{stage}_loss": np.mean(loss),
-            f"{stage}_iou_per_image": per_image_iou,
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
-            f"{stage}_fbeta_none": total_fbeta,
+            f"{stage}_fbeta_none": fbeta_mean,
             f"{stage}_fbeta_weighted_label_0": per_label_fbeta_weighted[0],
             f"{stage}_fbeta_weighted_label_1": per_label_fbeta_weighted[1],
             f"{stage}_fbeta_weighted_label_2": per_label_fbeta_weighted[2],
@@ -228,6 +231,16 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_fbeta_weighted_label_7": per_label_fbeta_weighted[7],
             f"{stage}_fbeta_weighted_label_8": per_label_fbeta_weighted[8],
             f"{stage}_fbeta_weighted_label_9": per_label_fbeta_weighted[9],
+            f"{stage}_fbeta_none_label_0": per_label_fbeta_none[0],
+            f"{stage}_fbeta_none_label_1": per_label_fbeta_none[1],
+            f"{stage}_fbeta_none_label_2": per_label_fbeta_none[2],
+            f"{stage}_fbeta_none_label_3": per_label_fbeta_none[3],
+            f"{stage}_fbeta_none_label_4": per_label_fbeta_none[4],
+            f"{stage}_fbeta_none_label_5": per_label_fbeta_none[5],
+            f"{stage}_fbeta_none_label_6": per_label_fbeta_none[6],
+            f"{stage}_fbeta_none_label_7": per_label_fbeta_none[7],
+            f"{stage}_fbeta_none_label_8": per_label_fbeta_none[8],
+            f"{stage}_fbeta_none_label_9": per_label_fbeta_none[9],
             f"{stage}_iou_none_label_0": per_label_iou_none[0],
             f"{stage}_iou_none_label_1": per_label_iou_none[1],
             f"{stage}_iou_none_label_2": per_label_iou_none[2],
@@ -237,17 +250,7 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_iou_none_label_6": per_label_iou_none[6],
             f"{stage}_iou_none_label_7": per_label_iou_none[7],
             f"{stage}_iou_none_label_8": per_label_iou_none[8],
-            f"{stage}_iou_none_label_9": per_label_iou_none[9],
-            f"{stage}_iou_weighted_label_0": per_label_iou_weighted[0],
-            f"{stage}_iou_weighted_label_1": per_label_iou_weighted[1],
-            f"{stage}_iou_weighted_label_2": per_label_iou_weighted[2],
-            f"{stage}_iou_weighted_label_3": per_label_iou_weighted[3],
-            f"{stage}_iou_weighted_label_4": per_label_iou_weighted[4],
-            f"{stage}_iou_weighted_label_5": per_label_iou_weighted[5],
-            f"{stage}_iou_weighted_label_6": per_label_iou_weighted[6],
-            f"{stage}_iou_weighted_label_7": per_label_iou_weighted[7],
-            f"{stage}_iou_weighted_label_8": per_label_iou_weighted[8],
-            f"{stage}_iou_weighted_label_9": per_label_iou_weighted[9]
+            f"{stage}_iou_none_label_9": per_label_iou_none[9]
         }
 
         self.log_dict(metrics, prog_bar=True)
@@ -288,6 +291,10 @@ if __name__ == "__main__":
     else:
         dcnn = sys.argv[2] # options 'resnet50' 'resnet18'
 
+    if sys.argv.__len__() < 4:
+        test_test_mode = 'train'
+    else:
+        test_test_mode = sys.argv[3] # options 'train' 'test'
 
     if dataset == 'sunrgbd':
 
@@ -345,11 +352,14 @@ if __name__ == "__main__":
             max_epochs=15,
         )
 
-    trainer.fit(
-        model,
-        train_dataloaders=train_dataloader,
-        val_dataloaders=valid_dataloader,
-    )
+    if test_test_mode == 'train':
+        trainer.fit(
+            model,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=valid_dataloader,
+        )
+    else:
+        torch.load("/home/luc/Documents/iitaff_resnet50_model_state_dict")
 
     valid_metrics = trainer.validate(model, dataloaders=valid_dataloader, verbose=True)
     pprint(valid_metrics)
