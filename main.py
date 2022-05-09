@@ -88,7 +88,9 @@ class ZhaoModel(pl.LightningModule):
 
         # dice loss taken from segmentation_models_pytorch
         # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
-        self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
+        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
+        self.loss_fn = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1) # focal loss with gamma=1 is cross entropy loss which is what was used in paper
+
 
     def encoder(self, x):
         # cnn block
