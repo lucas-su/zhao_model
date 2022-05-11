@@ -65,6 +65,8 @@ class ZhaoModel(pl.LightningModule):
         self.upsample_encoder = nn.Upsample(scale_factor=4)
 
         self.rescale_conv = nn.Conv2d(256, 10, 3 ,padding="same")
+        self.batch_norm_enc = nn.BatchNorm2d(10)
+        self.dropout_enc = nn.Dropout()
 
         # elm
         self.elmPooling = nn.AvgPool2d(16) # is 56 in paper but changed to 15 to accomodate smaller resnet input shape
@@ -83,6 +85,8 @@ class ZhaoModel(pl.LightningModule):
 
         # decoder after relation and elm
         self.conv4 = nn.Conv2d(10, 10, 3, padding='same') # to 10 channel for mask output
+        self.batch_norm_dec = nn.BatchNorm2d(10)
+        self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
 
 
@@ -94,12 +98,14 @@ class ZhaoModel(pl.LightningModule):
 
     def encoder(self, x):
         # cnn block
-        # summary(self.model_conv)
         cnnblock = self.model_conv(x)
         coordaspp = self.coordASPP(cnnblock)
 
         upsampled = self.upsample_encoder(coordaspp)
         encoder = self.rescale_conv(upsampled)
+        encoder = self.batch_norm_enc(encoder)
+        encoder = torch.relu(encoder)
+        encoder = self.dropout_enc(encoder)
         return encoder
 
     def decoder(self, x):
@@ -109,6 +115,9 @@ class ZhaoModel(pl.LightningModule):
         y = y.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,y)
         x = self.conv4(x)
+        x = self.batch_norm_dec(x)
+        x = self.dropout_dec(x)
+        x = torch.relu(x)
         x = self.upsample_decoder(x)
         return x
 
@@ -121,12 +130,9 @@ class ZhaoModel(pl.LightningModule):
         return x
 
     def attention(self,x,y):
-        x = torch.tanh(torch.add(torch.multiply(
-                                    self.att_w_c,
-                                    torch.cat((x,y), dim=1)
-                                    ),
-                                self.att_b_c)
-                        )
+        x = torch.multiply(self.att_w_c, torch.cat((x,y), dim=1))
+        x = torch.add(x, self.att_b_c)
+        x = torch.tanh(x)
         w = torch.softmax(self.att_w_i*x+self.att_b_i,dim=0)
         return w
 
@@ -342,7 +348,7 @@ if __name__ == "__main__":
         test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel(in_channels=3, out_classes=10)
-
+    summary(model)
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
             gpus=1,
