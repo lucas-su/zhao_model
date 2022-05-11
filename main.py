@@ -1,10 +1,9 @@
 import os, sys
 import torch
-import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch.nn as nn
-import torch.nn.functional as F
+
 import torchvision
 from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 
@@ -14,8 +13,9 @@ import numpy as np
 
 from torchinfo import summary
 
-import custom_layers
-import sunrgbd, iitaff
+import customLayers
+from datasetbuilders import iitaff, sunrgbd
+
 
 class MyResNet(ResNet):
     def __init__(self):
@@ -26,7 +26,6 @@ class MyResNet(ResNet):
             super(MyResNet, self).__init__(BasicBlock, [2, 2, 2, 2]) # resnet18
         else:
             raise NotImplementedError
-
 
     def forward(self, x):
         x = self.conv1(x)
@@ -41,12 +40,10 @@ class MyResNet(ResNet):
 
         return x
 
-class ZhaoModel(pl.LightningModule):
-
-    def __init__(self, in_channels, out_classes, **kwargs):
+class Encoder(nn.Module):
+    def __init__(self, dcnn):
         super().__init__()
-
-        #encoder
+        # encoder
         self.model_conv = MyResNet()
         if dcnn == "resnet50":
             self.model_conv.load_state_dict(torchvision.models.resnet50(pretrained=True).state_dict())
@@ -57,58 +54,43 @@ class ZhaoModel(pl.LightningModule):
         # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
         # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
-
         if dcnn[:6] == 'resnet':
-            self.coordASPP = custom_layers.CoordASPP(self.model_conv.layer4[2].bn3.num_features,256,[1,2,3,6]) # 512 for resnet18, 2048 for resnet50
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[2].bn3.num_features, 256,
+                                                              [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
         else:
-            raise NotImplementedError # for other models (squeezenet, alexnet etc.)
+            raise NotImplementedError  # for other models (squeezenet, alexnet etc.)
         self.upsample_encoder = nn.Upsample(scale_factor=4)
 
-        self.rescale_conv = nn.Conv2d(256, 10, 3 ,padding="same")
+        self.rescale_conv = nn.Conv2d(256, 10, 3, padding="same")
         self.batch_norm_enc = nn.BatchNorm2d(10)
         self.dropout_enc = nn.Dropout()
+        self.relu_enc = torch.nn.ReLU()
 
-        # elm
-        self.elmPooling = nn.AvgPool2d(16) # is 56 in paper but changed to 15 to accomodate smaller resnet input shape
-        self.elm1 = nn.Linear(40,1000)
-        self.elm2 = nn.Linear(1000, 10, bias=False)
-
-        # relation
-        self.conv3 = nn.Conv2d(10,1,3, padding="same")
-        self.att_w_c = torch.nn.Parameter(torch.zeros(20,32,32))
-        self.att_b_c = torch.nn.Parameter(torch.ones(20,32,32))
-        self.att_w_i = torch.nn.Parameter(torch.zeros(20,32,32))
-        self.att_b_i = torch.nn.Parameter(torch.ones(20,32,32))
-
-        self.fc3 = nn.Linear(20480, 128) # there's a large dimension change in the paper in the FC layer, it makes most sense to me to flatten first, hence the large input size
-        self.fc4 = nn.Linear(128, 10)
-
-        # decoder after relation and elm
-        self.conv4 = nn.Conv2d(10, 10, 3, padding='same') # to 10 channel for mask output
-        self.batch_norm_dec = nn.BatchNorm2d(10)
-        self.dropout_dec = nn.Dropout()
-        self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
-
-
-        # dice loss taken from segmentation_models_pytorch
-        # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
-        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
-        self.loss_fn = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1) # focal loss with gamma=1 is cross entropy loss which is what was used in paper
-
-
-    def encoder(self, x):
-        # cnn block
+    def forward(self, x):
         cnnblock = self.model_conv(x)
         coordaspp = self.coordASPP(cnnblock)
 
         upsampled = self.upsample_encoder(coordaspp)
         encoder = self.rescale_conv(upsampled)
         encoder = self.batch_norm_enc(encoder)
-        encoder = torch.relu(encoder)
+        encoder = self.relu_enc(encoder)
         encoder = self.dropout_enc(encoder)
         return encoder
 
-    def decoder(self, x):
+class Decoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # decoder after relation and elm
+        self.oselm = customLayers.oselm.OSELM()
+        self.relation = customLayers.relationshipModule.RelationshipAwareModule()
+
+        self.conv4 = nn.Conv2d(10, 10, 3, padding='same') # to 10 channel for mask output
+        self.batch_norm_dec = nn.BatchNorm2d(10)
+        self.dropout_dec = nn.Dropout()
+        self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
+
+
+    def forward(self, x):
         oselm = self.oselm(x)
         relation = self.relation(x)
         y = torch.add(oselm, relation)
@@ -116,39 +98,25 @@ class ZhaoModel(pl.LightningModule):
         x = torch.multiply(x,y)
         x = self.conv4(x)
         x = self.batch_norm_dec(x)
-        x = self.dropout_dec(x)
+        # x = self.dropout_dec(x)
         x = torch.relu(x)
         x = self.upsample_decoder(x)
         return x
 
-    def oselm(self, x):
-        x = self.elmPooling(x)
-        x = torch.flatten(x,start_dim=1)
-        x = self.elm1(x)
-        x = F.leaky_relu(x)
-        x = self.elm2(x)
-        return x
+class ZhaoModel(pl.LightningModule):
 
-    def attention(self,x,y):
-        x = torch.multiply(self.att_w_c, torch.cat((x,y), dim=1))
-        x = torch.add(x, self.att_b_c)
-        x = torch.tanh(x)
-        w = torch.softmax(self.att_w_i*x+self.att_b_i,dim=0)
-        return w
+    def __init__(self, in_channels, out_classes, **kwargs):
+        super().__init__()
+        self.encoder = Encoder(dcnn=dcnn)
+        self.decoder = Decoder()
 
-    def relation(self,x):
-        y = self.conv3(x)
-        y = torch.tile(y,[10,1,1])
-        y = self.attention(x,y)
-        y = torch.flatten(y,start_dim=1)
-        y = self.fc3(y)
-        y = torch.tanh(y)
-        y = self.fc4(y)
-        y = torch.softmax(y, dim=1)
-        return y
+        # dice loss taken from segmentation_models_pytorch
+        # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
+        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
+        self.loss_fn = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1) # focal loss with gamma=1 is cross entropy loss which is what was used in paper
+
 
     def forward(self, image):
-
         image = image.float()
         x = self.encoder(image)
 
@@ -160,7 +128,6 @@ class ZhaoModel(pl.LightningModule):
         image = batch["image"]
 
         # Shape of the image should be (batch_size, num_channels, height, width)
-        # if you work with grayscale images, expand channels dim to have [batch_size, 1, height, width]
         assert image.ndim == 4
 
         h, w = image.shape[2:]
@@ -174,11 +141,11 @@ class ZhaoModel(pl.LightningModule):
         loss = self.loss_fn(logits_mask, mask)
 
 
-        prob_mask = logits_mask.sigmoid()
-        pred_mask = (prob_mask > 0.5).float()
+        # prob_mask = logits_mask.sigmoid()
+        pred_mask = (logits_mask > 0.5).float()
 
         # tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="binary")
-        tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel", num_classes=10)
+        tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel")
 
         return {
             "loss": loss,
@@ -369,6 +336,7 @@ if __name__ == "__main__":
     else:
         torch.load("/home/luc/Documents/iitaff_resnet50_model_state_dict")
 
+    model.eval()
     valid_metrics = trainer.validate(model, dataloaders=valid_dataloader, verbose=True)
     pprint(valid_metrics)
 

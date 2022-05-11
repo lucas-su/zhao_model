@@ -1,6 +1,5 @@
-from multiprocessing import Pool
-import iitaff, os
-import numpy as np
+import os
+from datasetbuilders import iitaff
 from collections import Counter
 
 def dtest_testdataset(j):

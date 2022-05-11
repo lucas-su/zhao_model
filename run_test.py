@@ -1,6 +1,6 @@
 from main import ZhaoModel
 import sys, os, torch
-import sunrgbd, iitaff
+from datasetbuilders import iitaff, sunrgbd
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pprint import pprint
