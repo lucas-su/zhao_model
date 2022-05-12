@@ -182,15 +182,7 @@ class ZhaoModel(pl.LightningModule):
         dataset_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction="micro")
         none_iou = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
 
-
-        # total pixel frequencies in dataset
-        # class_weights = [486325588, 30685374, 1266505, 19379653, 2220869, 14231953, 2904292, 2229592, 2449537, 17317197]
-
-        # relative frequencies in dataset
-        class_weights = [0.83992525, 0.05299623, 0.00218736, 0.03347029, 0.00383563, 0.02457978, 0.00501596, 0.00385069, 0.00423056, 0.02990826]
-
-        # per_label_iou_none = [np.mean(list(i)) for i in none_iou.T.cpu()]
-
+        # average over all batches
         tp = tp.sum(0)
         fp = fp.sum(0)
         fn = fn.sum(0)
@@ -331,7 +323,7 @@ if __name__ == "__main__":
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
             gpus=1,
-            max_epochs=5,
+            max_epochs=15,
         )
     else:
         trainer = pl.Trainer(

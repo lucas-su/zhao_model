@@ -49,8 +49,8 @@ def conf_scores_weighted(candidate, gt, beta=1.0):
     :result: the Weighted F-beta score
     """
 
-    candidate = np.array(candidate.cpu())
-    gt = np.array(gt.cpu())
+    candidate = np.array(candidate.cpu().detach())
+    gt = np.array(gt.cpu().detach())
 
     if np.min(candidate) < 0.0 or np.max(candidate) > 1.0:
         raise ValueError("'candidate' values must be inside range [0 - 1]")
