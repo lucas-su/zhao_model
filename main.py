@@ -16,6 +16,7 @@ from torchinfo import summary
 import customLayers
 from datasetbuilders import iitaff, sunrgbd
 
+from stat_functions import conf_scores_weighted
 
 class MyResNet(ResNet):
     def __init__(self):
@@ -139,8 +140,11 @@ class ZhaoModel(pl.LightningModule):
 
         # Predicted mask contains logits, and loss_fn param `from_logits` is set to True
         loss = self.loss_fn(logits_mask, mask)
-
-
+        masksize = logits_mask.size()
+        weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
+        for b in range(masksize[0]):
+            for i in range(masksize[1]):
+                weighted_conf_metrics[b][i] = conf_scores_weighted(logits_mask[b][i], mask[b][i])
         # prob_mask = logits_mask.sigmoid()
         pred_mask = (logits_mask > 0.5).float()
 
@@ -153,6 +157,10 @@ class ZhaoModel(pl.LightningModule):
             "fp": fp,
             "fn": fn,
             "tn": tn,
+            "tpw": weighted_conf_metrics.sum(0).T[0],
+            "fpw": weighted_conf_metrics.sum(0).T[1],
+            "tnw": weighted_conf_metrics.sum(0).T[2],
+            "fnw": weighted_conf_metrics.sum(0).T[3],
         }
 
     def shared_epoch_end(self, outputs, stage):
@@ -161,6 +169,12 @@ class ZhaoModel(pl.LightningModule):
         fp = torch.cat([x["fp"] for x in outputs]).long()
         fn = torch.cat([x["fn"] for x in outputs]).long()
         tn = torch.cat([x["tn"] for x in outputs]).long()
+
+        tpw = np.array([x["tpw"] for x in outputs]).sum(0)
+        fpw = np.array([x["fpw"] for x in outputs]).sum(0)
+        fnw = np.array([x["fnw"] for x in outputs]).sum(0)
+        tnw = np.array([x["tnw"] for x in outputs]).sum(0)
+
         loss = ([x["loss"].item() for x in outputs])
 
         # aggregate intersection and union over whole dataset and then compute IoU score.
@@ -181,41 +195,41 @@ class ZhaoModel(pl.LightningModule):
         fp = fp.sum(0)
         fn = fn.sum(0)
         tn = tn.sum(0)
-        beta = 1
-        beta_tp = (1 + beta ** 2) * tp
-        beta_fn = (beta ** 2) * fn
-        score = beta_tp / (beta_tp + beta_fn + fp)
-        class_weights = torch.tensor(class_weights).to(tp.device)
-        per_label_fbeta_weighted = (score * class_weights)
 
-        per_label_fbeta_none = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
+        fbeta_w = []
+        for tpw_i, fpw_i, fnw_i, tnw_i in zip(tpw, fpw, fnw, tnw):
+            beta = 1
+            R = tpw_i/(fnw_i + tpw_i)
+            P = tpw_i/(fpw_i + tpw_i)
+            eps = np.spacing(1)
+            Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
+            fbeta_w.append(Q)
+
+        # beta = 1
+        # beta_tp = (1 + beta ** 2) * tp
+        # beta_fn = (beta ** 2) * fn
+        # score = beta_tp / (beta_tp + beta_fn + fp)
+        # class_weights = torch.tensor(class_weights).to(tp.device)
+        # per_label_fbeta_weighted = (score * class_weights)
+        #
+        # per_label_fbeta_none = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
         per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
-        fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
+        # fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
         metrics = {
             f"{stage}_loss": np.mean(loss),
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
-            f"{stage}_fbeta_none": fbeta_mean,
-            f"{stage}_fbeta_weighted_label_0": per_label_fbeta_weighted[0],
-            f"{stage}_fbeta_weighted_label_1": per_label_fbeta_weighted[1],
-            f"{stage}_fbeta_weighted_label_2": per_label_fbeta_weighted[2],
-            f"{stage}_fbeta_weighted_label_3": per_label_fbeta_weighted[3],
-            f"{stage}_fbeta_weighted_label_4": per_label_fbeta_weighted[4],
-            f"{stage}_fbeta_weighted_label_5": per_label_fbeta_weighted[5],
-            f"{stage}_fbeta_weighted_label_6": per_label_fbeta_weighted[6],
-            f"{stage}_fbeta_weighted_label_7": per_label_fbeta_weighted[7],
-            f"{stage}_fbeta_weighted_label_8": per_label_fbeta_weighted[8],
-            f"{stage}_fbeta_weighted_label_9": per_label_fbeta_weighted[9],
-            f"{stage}_fbeta_none_label_0": per_label_fbeta_none[0],
-            f"{stage}_fbeta_none_label_1": per_label_fbeta_none[1],
-            f"{stage}_fbeta_none_label_2": per_label_fbeta_none[2],
-            f"{stage}_fbeta_none_label_3": per_label_fbeta_none[3],
-            f"{stage}_fbeta_none_label_4": per_label_fbeta_none[4],
-            f"{stage}_fbeta_none_label_5": per_label_fbeta_none[5],
-            f"{stage}_fbeta_none_label_6": per_label_fbeta_none[6],
-            f"{stage}_fbeta_none_label_7": per_label_fbeta_none[7],
-            f"{stage}_fbeta_none_label_8": per_label_fbeta_none[8],
-            f"{stage}_fbeta_none_label_9": per_label_fbeta_none[9],
+            f"{stage}_fbeta_none": np.mean(fbeta_w),
+            f"{stage}_fbeta_none_label_0": fbeta_w[0],
+            f"{stage}_fbeta_none_label_1": fbeta_w[1],
+            f"{stage}_fbeta_none_label_2": fbeta_w[2],
+            f"{stage}_fbeta_none_label_3": fbeta_w[3],
+            f"{stage}_fbeta_none_label_4": fbeta_w[4],
+            f"{stage}_fbeta_none_label_5": fbeta_w[5],
+            f"{stage}_fbeta_none_label_6": fbeta_w[6],
+            f"{stage}_fbeta_none_label_7": fbeta_w[7],
+            f"{stage}_fbeta_none_label_8": fbeta_w[8],
+            f"{stage}_fbeta_none_label_9": fbeta_w[9],
             f"{stage}_iou_none_label_0": per_label_iou_none[0],
             f"{stage}_iou_none_label_1": per_label_iou_none[1],
             f"{stage}_iou_none_label_2": per_label_iou_none[2],
@@ -250,8 +264,6 @@ class ZhaoModel(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.0001)
-
-
 
 
 if __name__ == "__main__":

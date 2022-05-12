@@ -215,7 +215,6 @@ def _get_stats_multilabel(
     fp = output.sum(2) - tp
     fn = target.sum(2) - tp
     tn = torch.prod(torch.tensor(dims)) - (tp + fp + fn)
-
     return tp, fp, fn, tn
 
 
