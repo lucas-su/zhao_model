@@ -149,10 +149,6 @@ class ZhaoModel(pl.LightningModule):
         self.gamma_R_theta = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.alpha = 10
 
-        # dice loss taken from segmentation_models_pytorch
-        # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
-        # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
-
 
     def forward(self, image):
         image = image.float()
@@ -303,7 +299,7 @@ class ZhaoModel(pl.LightningModule):
 
 if __name__ == "__main__":
 
-    args = dict(arg.split("=") for arg in sys.argv)
+    args = dict(arg.split("=") for arg in sys.argv[1:])
 
     if "dataset" in args.keys():
         dataset = args["dataset"] # options 'sunrgbd' 'iitaff'
@@ -317,7 +313,7 @@ if __name__ == "__main__":
         print("using default dcnn type resnet50")
         dcnn = "resnet50"
 
-    if "test_test_mode" in args.keys():
+    if "train_test_mode" in args.keys():
         test_test_mode = args["train_test_mode"] # options 'train' 'test'
     else:
         print("training network by default")
