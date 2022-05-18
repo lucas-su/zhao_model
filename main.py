@@ -40,9 +40,7 @@ class MyResNet(ResNet):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-
         return x
-
 
 
 class MyVGG(VGG):
@@ -59,15 +57,11 @@ class MyVGG(VGG):
         # x = self.classifier(x)
         return x
 
-
-
-
 class Encoder(nn.Module):
     def __init__(self, dcnn):
         super().__init__()
+
         # encoder
-
-
         if dcnn == "resnet50":
             self.model_conv = MyResNet()
             self.model_conv.load_state_dict(torchvision.models.resnet50(pretrained=True).state_dict())
@@ -78,12 +72,13 @@ class Encoder(nn.Module):
             self.model_conv = MyResNet()
             self.model_conv.load_state_dict(torchvision.models.resnet18(pretrained=True).state_dict())
 
-        for param in self.model_conv.parameters():
-            param.requires_grad = False
+        if not train_dcnn:
+            for param in self.model_conv.parameters():
+                param.requires_grad = False
 
         # self.model_conv = torchvision.models.alexnet(pretrained=True)
         # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
-        # self.model_conv = torchvision.models.vgg16(pretrained=True) # vgg16 matches shape 28 28 512 which is in paper!
+        # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
         if dcnn == 'resnet50':
             self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn3.num_features, 256,
@@ -131,9 +126,9 @@ class Decoder(nn.Module):
         lambda_ = torch.ones(10, device='cuda') * 0.1
         omega_oselm = torch.mul(oselm, lambda_) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
-        Wfusion = torch.add(omega_oselm, r_a__objectLabels, torch.ones(10))
+        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(10).to("cuda"))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
-        x = torch.mul(x,Wfusion)
+        x = torch.multiply(x,Wfusion)
         x = self.conv4(x)
         x = self.batch_norm_dec(x)
         # x = self.dropout_dec(x)
@@ -163,9 +158,9 @@ class ZhaoModel(pl.LightningModule):
         image = image.float()
         x = self.encoder(image)
 
-        mask, r_a__objectLabels = self.decoder(x)
+        mask, r_a__objectLabels, oselm = self.decoder(x)
         mask = torch.softmax(mask, dim=1)
-        return mask, r_a__objectLabels
+        return mask, r_a__objectLabels, oselm
 
     def shared_step(self, batch, stage):
         image = batch["image"]
@@ -185,7 +180,7 @@ class ZhaoModel(pl.LightningModule):
         loss_seg = self.loss_seg(logits_mask, mask)
         loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
         loss_reg = self.gamma_R_theta(oselm, regularized_mask)
-        loss = self.alpha * loss_seg + loss_r + loss_reg
+        loss = self.alpha * loss_seg + loss_r + loss_reg # todo check loss functions implementations
 
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
@@ -199,7 +194,7 @@ class ZhaoModel(pl.LightningModule):
         tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel")
 
         return {
-            "loss_total": loss,
+            "loss": loss,
             "loss_seg": loss_seg,
             "loss_r": loss_r,
             "loss_reg": loss_reg,
@@ -225,7 +220,10 @@ class ZhaoModel(pl.LightningModule):
         fnw = np.array([x["fnw"] for x in outputs]).sum(0)
         tnw = np.array([x["tnw"] for x in outputs]).sum(0)
 
-        loss = ([x["loss"].item() for x in outputs])
+        loss_total = ([x["loss"].item() for x in outputs])
+        loss_seg = ([x["loss_seg"].item() for x in outputs])
+        loss_r = ([x["loss_r"].item() for x in outputs])
+        loss_reg = ([x["loss_reg"].item() for x in outputs])
 
         # aggregate intersection and union over whole dataset and then compute IoU score.
         # images without some target influence per_image_iou more than dataset_iou.
@@ -247,18 +245,13 @@ class ZhaoModel(pl.LightningModule):
             Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
             fbeta_w.append(Q)
 
-        # beta = 1
-        # beta_tp = (1 + beta ** 2) * tp
-        # beta_fn = (beta ** 2) * fn
-        # score = beta_tp / (beta_tp + beta_fn + fp)
-        # class_weights = torch.tensor(class_weights).to(tp.device)
-        # per_label_fbeta_weighted = (score * class_weights)
-        #
-        # per_label_fbeta_none = smp.metrics.fbeta_score(tp, fp, fn, tn, reduction=None)
         per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
         # fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
         metrics = {
-            f"{stage}_loss": np.mean(loss),
+            f"{stage}_loss_total": np.mean(loss_total),
+            f"{stage}_loss_seg": np.mean(loss_seg),
+            f"{stage}_loss_r": np.mean(loss_r),
+            f"{stage}_loss_reg": np.mean(loss_reg),
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
             f"{stage}_fbeta_weighted_mean": np.mean(fbeta_w),
@@ -310,20 +303,31 @@ class ZhaoModel(pl.LightningModule):
 
 if __name__ == "__main__":
 
-    if sys.argv.__len__() == 1:
+    args = dict(arg.split("=") for arg in sys.argv)
+
+    if "dataset" in args.keys():
+        dataset = args["dataset"] # options 'sunrgbd' 'iitaff'
+    else:
+        print("using default dataset sunrgbd")
         dataset = 'sunrgbd'
-    else:
-        dataset = sys.argv[1] # options 'sunrgbd' 'iitaff'
 
-    if sys.argv.__len__() < 3:
+    if "dcnn_type" in args.keys():
+        dcnn = args["dcnn_type"] # options 'resnet50' 'resnet18'
+    else:
+        print("using default dcnn type resnet50")
         dcnn = "resnet50"
-    else:
-        dcnn = sys.argv[2] # options 'resnet50' 'resnet18'
 
-    if sys.argv.__len__() < 4:
-        test_test_mode = 'train'
+    if "test_test_mode" in args.keys():
+        test_test_mode = args["train_test_mode"] # options 'train' 'test'
     else:
-        test_test_mode = sys.argv[3] # options 'train' 'test'
+        print("training network by default")
+        test_test_mode = 'train'
+
+    if "train_dcnn" in args.keys():
+        train_dcnn = True if args["train_dcnn"].lower() == 'true' else False # options true, false
+    else:
+        print("training dcnn layers by default")
+        train_dcnn = True
 
     if dataset == 'sunrgbd':
         if os.path.exists("devmode"):
@@ -397,4 +401,4 @@ if __name__ == "__main__":
     test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
     pprint(test_metrics)
 
-    torch.save(model.state_dict(), f'{dataset}_{dcnn}_model_state_dict')
+    torch.save(model.state_dict(), f'{dataset}_{dcnn}_{"dcnn-trained" if train_dcnn else "dcnn-untrained"}_model_state_dict')
