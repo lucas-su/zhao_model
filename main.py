@@ -6,6 +6,7 @@ import torch.nn as nn
 
 import torchvision
 from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
+from torchvision.models.vgg import VGG, make_layers
 
 from pprint import pprint
 from torch.utils.data import DataLoader
@@ -28,6 +29,7 @@ class MyResNet(ResNet):
         else:
             raise NotImplementedError
 
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -41,23 +43,56 @@ class MyResNet(ResNet):
 
         return x
 
+
+
+class MyVGG(VGG):
+    def __init__(self):
+        self.cfg = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
+        super(MyVGG, self).__init__(make_layers(self.cfg))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for y in self.features:
+            x = y(x)
+        # x = self.features[:22](x) # something like this todo check
+        # x = self.avgpool(x)
+        # x = torch.flatten(x, 1)
+        # x = self.classifier(x)
+        return x
+
+
+
+
 class Encoder(nn.Module):
     def __init__(self, dcnn):
         super().__init__()
         # encoder
-        self.model_conv = MyResNet()
+
+
         if dcnn == "resnet50":
+            self.model_conv = MyResNet()
             self.model_conv.load_state_dict(torchvision.models.resnet50(pretrained=True).state_dict())
+        elif dcnn == "VGG":
+            self.model_conv = MyVGG()
+            self.model_conv.load_state_dict(torchvision.models.vgg16(pretrained=True).state_dict())
         else:
+            self.model_conv = MyResNet()
             self.model_conv.load_state_dict(torchvision.models.resnet18(pretrained=True).state_dict())
+
+        for param in self.model_conv.parameters():
+            param.requires_grad = False
 
         # self.model_conv = torchvision.models.alexnet(pretrained=True)
         # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
-        # self.model_conv = torchvision.models.vgg16(pretrained=True)
+        # self.model_conv = torchvision.models.vgg16(pretrained=True) # vgg16 matches shape 28 28 512 which is in paper!
 
-        if dcnn[:6] == 'resnet':
-            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[2].bn3.num_features, 256,
+        if dcnn == 'resnet50':
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn3.num_features, 256,
                                                               [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
+        elif dcnn == 'resnet18':
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn2.num_features, 256,
+                                                              [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
+        elif dcnn == "VGG":
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(512, 256, [1, 2, 3, 6])
         else:
             raise NotImplementedError  # for other models (squeezenet, alexnet etc.)
         self.upsample_encoder = nn.Upsample(scale_factor=4)
@@ -93,16 +128,19 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         oselm = self.oselm(x)
-        relation = self.relation(x)
-        y = torch.add(oselm, relation)
-        y = y.unsqueeze(2).unsqueeze(3)
-        x = torch.multiply(x,y)
+        lambda_ = torch.ones(10, device='cuda') * 0.1
+        omega_oselm = torch.mul(oselm, lambda_) # use mul here becuase lambda_ is scalar
+        r_a__objectLabels = self.relation(x)
+        Wfusion = torch.add(omega_oselm, r_a__objectLabels, torch.ones(10))
+        Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
+        x = torch.mul(x,Wfusion)
         x = self.conv4(x)
         x = self.batch_norm_dec(x)
         # x = self.dropout_dec(x)
         x = torch.relu(x)
         x = self.upsample_decoder(x)
-        return x
+        return x, r_a__objectLabels, oselm
+
 
 class ZhaoModel(pl.LightningModule):
 
@@ -111,35 +149,44 @@ class ZhaoModel(pl.LightningModule):
         self.encoder = Encoder(dcnn=dcnn)
         self.decoder = Decoder()
 
+        self.loss_seg = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
+        self.loss_r_aware = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
+        self.gamma_R_theta = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
+        self.alpha = 10
+
         # dice loss taken from segmentation_models_pytorch
         # self.loss_fn = smp.losses.DiceLoss(smp.losses.BINARY_MODE, from_logits=True) # binary because one hot is implemented in dataset already
         # self.loss_fn = smp.losses.DiceLoss(smp.losses.MULTILABEL_MODE, from_logits=True)
-        self.loss_fn = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1) # focal loss with gamma=1 is cross entropy loss which is what was used in paper
 
 
     def forward(self, image):
         image = image.float()
         x = self.encoder(image)
 
-        mask = self.decoder(x)
+        mask, r_a__objectLabels = self.decoder(x)
         mask = torch.softmax(mask, dim=1)
-        return mask
+        return mask, r_a__objectLabels
 
     def shared_step(self, batch, stage):
         image = batch["image"]
 
         # Shape of the image should be (batch_size, num_channels, height, width)
         assert image.ndim == 4
-
         h, w = image.shape[2:]
         assert h % 32 == 0 and w % 32 == 0
-
         mask = batch["mask"]
+        objectLabel = batch["object"]
 
-        logits_mask = self.forward(image)
+        regularized_mask = torch.flatten(mask,start_dim=2).any(dim=2).float() # number of times each affordance is present
 
-        # Predicted mask contains logits, and loss_fn param `from_logits` is set to True
-        loss = self.loss_fn(logits_mask, mask)
+
+        logits_mask, r_a__objectLabels, oselm = self.forward(image)
+
+        loss_seg = self.loss_seg(logits_mask, mask)
+        loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
+        loss_reg = self.gamma_R_theta(oselm, regularized_mask)
+        loss = self.alpha * loss_seg + loss_r + loss_reg
+
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
         for b in range(masksize[0]):
@@ -152,7 +199,10 @@ class ZhaoModel(pl.LightningModule):
         tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel")
 
         return {
-            "loss": loss,
+            "loss_total": loss,
+            "loss_seg": loss_seg,
+            "loss_r": loss_r,
+            "loss_reg": loss_reg,
             "tp": tp,
             "fp": fp,
             "fn": fn,
@@ -211,17 +261,17 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_loss": np.mean(loss),
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
-            f"{stage}_fbeta_none": np.mean(fbeta_w),
-            f"{stage}_fbeta_none_label_0": fbeta_w[0],
-            f"{stage}_fbeta_none_label_1": fbeta_w[1],
-            f"{stage}_fbeta_none_label_2": fbeta_w[2],
-            f"{stage}_fbeta_none_label_3": fbeta_w[3],
-            f"{stage}_fbeta_none_label_4": fbeta_w[4],
-            f"{stage}_fbeta_none_label_5": fbeta_w[5],
-            f"{stage}_fbeta_none_label_6": fbeta_w[6],
-            f"{stage}_fbeta_none_label_7": fbeta_w[7],
-            f"{stage}_fbeta_none_label_8": fbeta_w[8],
-            f"{stage}_fbeta_none_label_9": fbeta_w[9],
+            f"{stage}_fbeta_weighted_mean": np.mean(fbeta_w),
+            f"{stage}_fbeta_weighted_label_0": fbeta_w[0],
+            f"{stage}_fbeta_weighted_label_1": fbeta_w[1],
+            f"{stage}_fbeta_weighted_label_2": fbeta_w[2],
+            f"{stage}_fbeta_weighted_label_3": fbeta_w[3],
+            f"{stage}_fbeta_weighted_label_4": fbeta_w[4],
+            f"{stage}_fbeta_weighted_label_5": fbeta_w[5],
+            f"{stage}_fbeta_weighted_label_6": fbeta_w[6],
+            f"{stage}_fbeta_weighted_label_7": fbeta_w[7],
+            f"{stage}_fbeta_weighted_label_8": fbeta_w[8],
+            f"{stage}_fbeta_weighted_label_9": fbeta_w[9],
             f"{stage}_iou_none_label_0": per_label_iou_none[0],
             f"{stage}_iou_none_label_1": per_label_iou_none[1],
             f"{stage}_iou_none_label_2": per_label_iou_none[2],
@@ -276,7 +326,6 @@ if __name__ == "__main__":
         test_test_mode = sys.argv[3] # options 'train' 'test'
 
     if dataset == 'sunrgbd':
-
         if os.path.exists("devmode"):
             root = "/media/luc/data/sunrgbd"
         else:
