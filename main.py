@@ -351,9 +351,9 @@ if __name__ == "__main__":
         test_dataset = iitaff.iitaff(root, "test")
     elif dataset == 'umd':
         if os.path.exists("devmode"):
-            root = "/media/luc/data/UMD/part-affordance-dataset/tools"
+            root = "/media/luc/data/UMD/part-affordance-dataset"
         else:
-            root = "/home/schootuiterkampl/part-affordance-dataset/tools"
+            root = "/home/schootuiterkampl/part-affordance-dataset"
 
         train_dataset = umd.umd(root, "train")
         valid_dataset = umd.umd(root, "test") ##################### valid == test because umd does not provide valid set
