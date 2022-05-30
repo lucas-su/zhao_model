@@ -15,7 +15,7 @@ import numpy as np
 from torchinfo import summary
 
 import customLayers
-from datasetbuilders import iitaff, sunrgbd
+from datasetbuilders import iitaff, sunrgbd, umd
 
 from stat_functions import conf_scores_weighted
 
@@ -38,8 +38,8 @@ class MyResNet(ResNet):
 
         x = self.layer1(x)
         x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        # x = self.layer3(x) # layers disabled because table indicates the dcnn stops at 512 channels
+        # x = self.layer4(x)
         return x
 
 
@@ -49,9 +49,9 @@ class MyVGG(VGG):
         super(MyVGG, self).__init__(make_layers(self.cfg))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for y in self.features:
-            x = y(x)
-        # x = self.features[:22](x) # something like this todo check
+        # for y in self.features:
+        #     x = y(x)
+        x = self.features[:23](x)
         # x = self.avgpool(x)
         # x = torch.flatten(x, 1)
         # x = self.classifier(x)
@@ -81,7 +81,7 @@ class Encoder(nn.Module):
         # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
         if dcnn == 'resnet50':
-            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn3.num_features, 256,
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer2[-1].bn3.num_features, 256,
                                                               [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
         elif dcnn == 'resnet18':
             self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn2.num_features, 256,
@@ -109,29 +109,34 @@ class Encoder(nn.Module):
         return encoder
 
 class Decoder(nn.Module):
-    def __init__(self):
+    def __init__(self, dataset):
         super().__init__()
         # decoder after relation and elm
-        self.oselm = customLayers.oselm.OSELM()
-        self.relation = customLayers.relationshipModule.RelationshipAwareModule()
+        self.oselm = customLayers.oselm.OSELM(dataset=dataset)
+        self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset)
 
-        self.conv4 = nn.Conv2d(10, 10, 3, padding='same') # to 10 channel for mask output
+        self.conv4 = nn.Conv2d(10, 10, 3) # to 10 channel for mask output
         self.batch_norm_dec = nn.BatchNorm2d(10)
         self.dropout_dec = nn.Dropout()
-        self.upsample_decoder = nn.Upsample(scale_factor=8) # revert to some resolution to see output images
-
+        self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
+        if dataset == 'umd':
+            out_features = 7
+        elif dataset == 'iitaff':
+            out_features = 10
+        else:
+            raise ValueError
+        self.lambda_ = torch.ones(out_features, device='cuda') * 0.1
 
     def forward(self, x):
         oselm = self.oselm(x)
-        lambda_ = torch.ones(10, device='cuda') * 0.1
-        omega_oselm = torch.mul(oselm, lambda_) # use mul here becuase lambda_ is scalar
+        omega_oselm = torch.mul(oselm, self.lambda_) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
         Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(10).to("cuda"))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,Wfusion)
         x = self.conv4(x)
         x = self.batch_norm_dec(x)
-        # x = self.dropout_dec(x)
+        x = self.dropout_dec(x)
         x = torch.relu(x)
         x = self.upsample_decoder(x)
         return x, r_a__objectLabels, oselm
@@ -142,11 +147,11 @@ class ZhaoModel(pl.LightningModule):
     def __init__(self, in_channels, out_classes, **kwargs):
         super().__init__()
         self.encoder = Encoder(dcnn=dcnn)
-        self.decoder = Decoder()
+        self.decoder = Decoder(dataset=dataset)
 
         self.loss_seg = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.loss_r_aware = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
-        self.gamma_R_theta = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
+        self.gamma_R_theta = torch.nn.MSELoss()
         self.alpha = 10
 
 
@@ -164,7 +169,7 @@ class ZhaoModel(pl.LightningModule):
         # Shape of the image should be (batch_size, num_channels, height, width)
         assert image.ndim == 4
         h, w = image.shape[2:]
-        assert h % 32 == 0 and w % 32 == 0
+        # assert h % 32 == 0 and w % 32 == 0
         mask = batch["mask"]
         objectLabel = batch["object"]
 
@@ -175,8 +180,8 @@ class ZhaoModel(pl.LightningModule):
 
         loss_seg = self.loss_seg(logits_mask, mask)
         loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
-        loss_reg = self.gamma_R_theta(oselm, regularized_mask)
-        loss = self.alpha * loss_seg + loss_r + loss_reg # todo check loss functions implementations
+        loss_reg = self.gamma_R_theta(logits_mask, mask.float())
+        loss = self.alpha * loss_seg + loss_r + loss_reg
 
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
@@ -302,13 +307,13 @@ if __name__ == "__main__":
     args = dict(arg.split("=") for arg in sys.argv[1:])
 
     if "dataset" in args.keys():
-        dataset = args["dataset"] # options 'sunrgbd' 'iitaff'
+        dataset = args["dataset"] # options 'sunrgbd' 'iitaff' 'umd'
     else:
         print("using default dataset sunrgbd")
         dataset = 'sunrgbd'
 
     if "dcnn_type" in args.keys():
-        dcnn = args["dcnn_type"] # options 'resnet50' 'resnet18'
+        dcnn = args["dcnn_type"] # options 'resnet50' 'resnet18' 'vgg'
     else:
         print("using default dcnn type resnet50")
         dcnn = "resnet50"
@@ -344,12 +349,21 @@ if __name__ == "__main__":
         train_dataset = iitaff.iitaff(root, "train")
         valid_dataset = iitaff.iitaff(root, "valid")
         test_dataset = iitaff.iitaff(root, "test")
+    elif dataset == 'umd':
+        if os.path.exists("devmode"):
+            root = "/media/luc/data/UMD"
+        else:
+            root = "/home/schootuiterkampl/UMD"
+
+        train_dataset = umd.umd(root, "train")
+        valid_dataset = umd.umd(root, "test") ##################### valid == test because umd does not provide valid set
+        test_dataset = umd.umd(root, "test")
 
     else:
         raise ValueError
 
     assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
-    assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
+    # assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames)) #disable for umd
     assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
     print(f"Train size: {len(train_dataset)}")

@@ -6,11 +6,11 @@ import pickle
 
 from PIL import Image
 
-
-if os.path.exists("devmode"):
-    transfer_table = json.load(open('/media/luc/data/transfer_table.json','r'))
-else:
-    transfer_table = json.load(open('/home/schootuiterkampl/sunrgbd/transfer_table.json', 'r'))
+#
+# if os.path.exists("devmode"):
+#     transfer_table = json.load(open('/media/luc/data/transfer_table.json','r'))
+# else:
+#     transfer_table = json.load(open('/home/schootuiterkampl/sunrgbd/transfer_table.json', 'r'))
 
 
 class sunrgbd(torch.utils.data.Dataset):

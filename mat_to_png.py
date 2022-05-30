@@ -1,9 +1,14 @@
+import os
 import pickle
 import numpy as np
 import h5py
 from PIL import Image
+import os
 
 if __name__ == '__main__':
+    walk = os.walk('/media/luc/data/UMD/part-affordance-dataset')
+    # for i in walk:
+
     path = '/home/luc/Downloads/SUNRGBDtoolbox/SUNRGBDtoolbox/Metadata/SUNRGBD2Dseg.mat'
     dataroot = '/media/luc/data/'
     f = h5py.File(path,'r')

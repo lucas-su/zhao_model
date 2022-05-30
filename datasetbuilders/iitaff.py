@@ -86,10 +86,10 @@ class iitaff(torch.utils.data.Dataset):
         sample = dict(image=image, mask=mask, depth=depth, object=object)
 
 
-        image = np.array(Image.fromarray(sample["image"]).resize((256, 256), Image.LINEAR))
-        mask = np.array(Image.fromarray(sample["mask"]).resize((256, 256), Image.NEAREST))
-        depth = np.array(Image.fromarray(sample["depth"]).resize((256, 256), Image.NEAREST))
-        # not needed for object
+        image = np.array(Image.fromarray(sample["image"]).resize((244, 244), Image.LINEAR))
+        mask = np.array(Image.fromarray(sample["mask"]).resize((244, 244), Image.NEAREST))
+        depth = np.array(Image.fromarray(sample["depth"]).resize((244, 244), Image.NEAREST))
+
 
 
         mask = to_cat(mask, 10)
