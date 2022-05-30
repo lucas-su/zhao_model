@@ -120,18 +120,18 @@ class Decoder(nn.Module):
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
         if dataset == 'umd':
-            out_features = 17
+            self.out_features = 17
         elif dataset == 'iitaff':
-            out_features = 10
+            self.out_features = 10
         else:
             raise ValueError
-        self.lambda_ = torch.ones(out_features, device='cuda') * 0.1
+        self.lambda_ = torch.ones(self.out_features, device='cuda') * 0.1
 
     def forward(self, x):
         oselm = self.oselm(x)
         omega_oselm = torch.mul(oselm, self.lambda_) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
-        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(10).to("cuda"))
+        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.out_features).to("cuda"))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,Wfusion)
         x = self.conv4(x)
