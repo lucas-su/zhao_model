@@ -120,7 +120,7 @@ class Decoder(nn.Module):
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
         if dataset == 'umd':
-            out_features = 7
+            out_features = 17
         elif dataset == 'iitaff':
             out_features = 10
         else:
