@@ -173,7 +173,7 @@ class ZhaoModel(pl.LightningModule):
         mask = batch["mask"]
         objectLabel = batch["object"]
 
-        regularized_mask = torch.flatten(mask,start_dim=2).any(dim=2).float() # number of times each affordance is present
+        # regularized_mask = torch.flatten(mask,start_dim=2).any(dim=2).float() # number of times each affordance is present
 
 
         logits_mask, r_a__objectLabels, oselm = self.forward(image)
@@ -351,9 +351,9 @@ if __name__ == "__main__":
         test_dataset = iitaff.iitaff(root, "test")
     elif dataset == 'umd':
         if os.path.exists("devmode"):
-            root = "/media/luc/data/UMD"
+            root = "/media/luc/data/UMD/part-affordance-dataset/tools"
         else:
-            root = "/home/schootuiterkampl/UMD"
+            root = "/home/schootuiterkampl/part-affordance-dataset/tools"
 
         train_dataset = umd.umd(root, "train")
         valid_dataset = umd.umd(root, "test") ##################### valid == test because umd does not provide valid set

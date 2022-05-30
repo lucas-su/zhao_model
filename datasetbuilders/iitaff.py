@@ -63,11 +63,11 @@ class iitaff(torch.utils.data.Dataset):
         image_path = f'{self.root}/rgb/{filename}'
         image = np.array(Image.open(image_path).convert("RGB"))
 
-        depth_path = f'{self.root}/deep/{filename[:-4]}.txt'
-        with open(depth_path) as file:
-            raw_depth = file.read().split('\n')
-        raw_depth.remove("")
-        depth = np.array([np.array(row.split(' '), dtype=float) for row in raw_depth])
+        # depth_path = f'{self.root}/deep/{filename[:-4]}.txt'
+        # with open(depth_path) as file:
+        #     raw_depth = file.read().split('\n')
+        # raw_depth.remove("")
+        # depth = np.array([np.array(row.split(' '), dtype=float) for row in raw_depth])
 
         mask_path = f'{self.root}/affordances_labels/{filename[:-4]}.txt'
         with open(mask_path) as file:
@@ -83,12 +83,12 @@ class iitaff(torch.utils.data.Dataset):
 
 
 
-        sample = dict(image=image, mask=mask, depth=depth, object=object)
+        sample = dict(image=image, mask=mask, object=object) #depth=depth,
 
 
         image = np.array(Image.fromarray(sample["image"]).resize((244, 244), Image.LINEAR))
         mask = np.array(Image.fromarray(sample["mask"]).resize((244, 244), Image.NEAREST))
-        depth = np.array(Image.fromarray(sample["depth"]).resize((244, 244), Image.NEAREST))
+        # depth = np.array(Image.fromarray(sample["depth"]).resize((244, 244), Image.NEAREST))
 
 
 
@@ -101,7 +101,7 @@ class iitaff(torch.utils.data.Dataset):
         # convert to other format HWC -> CHW
         sample["image"] = np.moveaxis(image, -1, 0)
         sample["mask"] =  np.moveaxis(mask, -1, 0)
-        sample["depth"] = np.expand_dims(depth, 0)
+        # sample["depth"] = np.expand_dims(depth, 0)
         sample["object"] =  np.moveaxis(object, -1, 0)
 
         return sample
