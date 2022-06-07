@@ -122,7 +122,7 @@ class Decoder(nn.Module):
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
 
-        self.lambda_ = torch.ones(nchannels, device='cuda') * 0.1
+        self.lambda_ = torch.ones(nchannels) * 0.1
         self.nchannels = nchannels
 
     def forward(self, x):
