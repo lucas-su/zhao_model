@@ -142,7 +142,7 @@ class Decoder(nn.Module):
 
 class ZhaoModel(pl.LightningModule):
 
-    def __init__(self, in_channels, out_classes, **kwargs):
+    def __init__(self):
         super().__init__()
         if dataset == 'umd':
             self.nchannels = 17
@@ -381,11 +381,11 @@ if __name__ == "__main__":
         valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=8)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
-    model = ZhaoModel(in_channels=3, out_classes=10)
+    model = ZhaoModel()
     summary(model)
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
