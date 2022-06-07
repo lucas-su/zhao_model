@@ -122,12 +122,12 @@ class Decoder(nn.Module):
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
 
-        self.lambda_ = torch.ones(nchannels) * 0.1
+        # self.lambda_ = torch.ones(nchannels, device=) * 0.1
         self.nchannels = nchannels
 
     def forward(self, x):
         oselm = self.oselm(x)
-        omega_oselm = torch.mul(oselm, self.lambda_) # use mul here becuase lambda_ is scalar
+        omega_oselm = torch.mul(oselm, torch.ones(x.shape[1], device=oselm.device) * 0.1) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
         Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.nchannels).to("cuda"))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
