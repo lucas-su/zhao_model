@@ -5,21 +5,21 @@ class RelationshipAwareModule(nn.Module):
     def __init__(self, dataset):
         super().__init__()
         if dataset == 'umd':
-            out_features = 17
+            self.out_features = 17
         elif dataset == 'iitaff':
-            out_features = 10
+            self.out_features = 10
         else:
             raise ValueError
         # relation
         # self.fc1 = nn.Linear(2048,128)
-        self.conv3 = nn.Conv2d(10,1,3, padding="same")
-        self.batchnorm1 = nn.BatchNorm2d(1)
+        self.conv3 = nn.Conv2d(self.out_features,1,3, padding="same")
+        self.batchnorm1 = nn.BatchNorm2d(1) # batch norm 1???
         self.dropout = nn.Dropout()
 
-        self.att_w_c = nn.Parameter(torch.ones(10,30752,out_features,128)) # from 2048 changed after input resize
-        self.att_b_c = nn.Parameter(torch.zeros(out_features,128))
-        self.att_w_i = nn.Parameter(torch.ones(out_features, 128,out_features))
-        self.att_b_i = nn.Parameter(torch.zeros(out_features))
+        self.att_w_c = nn.Parameter(torch.ones(self.out_features,30752,self.out_features,128)) # from 2048 changed after input resize
+        self.att_b_c = nn.Parameter(torch.zeros(self.out_features,128))
+        self.att_w_i = nn.Parameter(torch.ones(self.out_features, 128,self.out_features))
+        self.att_b_i = nn.Parameter(torch.zeros(self.out_features))
 
         self.flatten = torch.nn.Flatten(start_dim=2)
         # self.conv4 = nn.Conv2d(10,3,3,padding="same")
@@ -70,7 +70,7 @@ class RelationshipAwareModule(nn.Module):
         y = self.conv3(x)
         y = self.batchnorm1(y)
         y =  self.dropout(y)
-        tiled = torch.tile(y, [10, 1 ,1])
+        tiled = torch.tile(y, [self.out_features, 1 ,1])
         Omega_c = self.attention(x, tiled)
 
         return Omega_c

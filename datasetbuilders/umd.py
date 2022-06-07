@@ -103,7 +103,7 @@ class umd(torch.utils.data.Dataset):
         mask = np.array(Image.fromarray(sample["mask"]).resize((244, 244), Image.NEAREST))
         # depth = np.array(Image.fromarray(sample["depth"]).resize((244, 244), Image.NEAREST))
 
-        mask = to_cat(mask, 7)
+        mask = to_cat(mask, 17)
         object = to_cat(current_obj, 17)
         # if object.shape[0] > 1:
         #     object = [sum(object)]

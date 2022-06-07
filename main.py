@@ -58,7 +58,7 @@ class MyVGG(VGG):
         return x
 
 class Encoder(nn.Module):
-    def __init__(self, dcnn):
+    def __init__(self, dcnn, nchannels):
         super().__init__()
 
         # encoder
@@ -92,8 +92,10 @@ class Encoder(nn.Module):
             raise NotImplementedError  # for other models (squeezenet, alexnet etc.)
         self.upsample_encoder = nn.Upsample(scale_factor=4)
 
-        self.rescale_conv = nn.Conv2d(256, 10, 3, padding="same")
-        self.batch_norm_enc = nn.BatchNorm2d(10)
+
+
+        self.rescale_conv = nn.Conv2d(256, nchannels, 3, padding="same")
+        self.batch_norm_enc = nn.BatchNorm2d(nchannels)
         self.dropout_enc = nn.Dropout()
         self.relu_enc = torch.nn.ReLU()
 
@@ -109,29 +111,25 @@ class Encoder(nn.Module):
         return encoder
 
 class Decoder(nn.Module):
-    def __init__(self, dataset):
+    def __init__(self, dataset, nchannels):
         super().__init__()
         # decoder after relation and elm
         self.oselm = customLayers.oselm.OSELM(dataset=dataset)
         self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset)
 
-        self.conv4 = nn.Conv2d(10, 10, 3) # to 10 channel for mask output
-        self.batch_norm_dec = nn.BatchNorm2d(10)
+        self.conv4 = nn.Conv2d(nchannels, nchannels, 3) # to n channels for mask output
+        self.batch_norm_dec = nn.BatchNorm2d(nchannels)
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
-        if dataset == 'umd':
-            self.out_features = 17
-        elif dataset == 'iitaff':
-            self.out_features = 10
-        else:
-            raise ValueError
-        self.lambda_ = torch.ones(self.out_features, device='cuda') * 0.1
+
+        self.lambda_ = torch.ones(nchannels, device='cuda') * 0.1
+        self.nchannels = nchannels
 
     def forward(self, x):
         oselm = self.oselm(x)
         omega_oselm = torch.mul(oselm, self.lambda_) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
-        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.out_features).to("cuda"))
+        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.nchannels).to("cuda"))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,Wfusion)
         x = self.conv4(x)
@@ -146,13 +144,19 @@ class ZhaoModel(pl.LightningModule):
 
     def __init__(self, in_channels, out_classes, **kwargs):
         super().__init__()
-        self.encoder = Encoder(dcnn=dcnn)
-        self.decoder = Decoder(dataset=dataset)
+        if dataset == 'umd':
+            self.nchannels = 17
+        elif dataset == 'iitaff':
+            self.nchannels = 10
+        self.encoder = Encoder(dcnn, self.nchannels)
+        self.decoder = Decoder(dataset, self.nchannels)
 
         self.loss_seg = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.loss_r_aware = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.gamma_R_theta = torch.nn.MSELoss()
         self.alpha = 10
+
+
 
 
     def forward(self, image):
@@ -357,29 +361,29 @@ if __name__ == "__main__":
 
         train_dataset = umd.umd(root, "train")
         valid_dataset = umd.umd(root, "test") ##################### valid == test because umd does not provide valid set
-        test_dataset = umd.umd(root, "test")
+        # test_dataset = umd.umd(root, "test")
 
     else:
         raise ValueError
 
-    assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
+    # assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
     # assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames)) #disable for umd
     assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
     print(f"Train size: {len(train_dataset)}")
     print(f"Valid size: {len(valid_dataset)}")
-    print(f"Test size: {len(test_dataset)}")
+    # print(f"Test size: {len(test_dataset)}")
 
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=4)
-        test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=4)
+        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=0)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0)
+        # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
         train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=n_cpu)
         valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
-        test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+        # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel(in_channels=3, out_classes=10)
     summary(model)
@@ -408,7 +412,7 @@ if __name__ == "__main__":
     pprint(valid_metrics)
 
     # run test dataset
-    test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
-    pprint(test_metrics)
+    # test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
+    # pprint(test_metrics)
 
     torch.save(model.state_dict(), f'{dataset}_{dcnn}_{"dcnn-trained" if train_dcnn else "dcnn-untrained"}_model_state_dict')
