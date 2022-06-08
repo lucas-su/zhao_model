@@ -10,6 +10,7 @@ class OSELM(nn.Module):
         self.elmPooling = nn.AvgPool2d(56) # is 56 in paper but changed to accomodate resnet input shape
         self.flatten = torch.nn.Flatten(start_dim=1)
         self.elm1 = nn.Linear(68,1000)
+        # self.elm1 = nn.Linear(32, 1000)
         self.relu = torch.nn.LeakyReLU()
         if dataset == 'umd':
             out_features = 17

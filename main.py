@@ -29,7 +29,6 @@ class MyResNet(ResNet):
         else:
             raise NotImplementedError
 
-
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -41,7 +40,6 @@ class MyResNet(ResNet):
         # x = self.layer3(x) # layers disabled because table indicates the dcnn stops at 512 channels
         # x = self.layer4(x)
         return x
-
 
 class MyVGG(VGG):
     def __init__(self):
@@ -92,8 +90,6 @@ class Encoder(nn.Module):
             raise NotImplementedError  # for other models (squeezenet, alexnet etc.)
         self.upsample_encoder = nn.Upsample(scale_factor=4)
 
-
-
         self.rescale_conv = nn.Conv2d(256, nchannels, 3, padding="same")
         self.batch_norm_enc = nn.BatchNorm2d(nchannels)
         self.dropout_enc = nn.Dropout()
@@ -139,7 +135,6 @@ class Decoder(nn.Module):
         x = self.upsample_decoder(x)
         return x, r_a__objectLabels, oselm
 
-
 class ZhaoModel(pl.LightningModule):
 
     def __init__(self):
@@ -157,8 +152,6 @@ class ZhaoModel(pl.LightningModule):
         self.alpha = 10
 
 
-
-
     def forward(self, image):
         image = image.float()
         x = self.encoder(image)
@@ -174,18 +167,20 @@ class ZhaoModel(pl.LightningModule):
         assert image.ndim == 4
         h, w = image.shape[2:]
         # assert h % 32 == 0 and w % 32 == 0
-        mask = batch["mask"]
+        mask = batch["mask"].float()
+        # mask = mask[0:1, 0:8, :] # todo remove
         objectLabel = batch["object"]
-
-        # regularized_mask = torch.flatten(mask,start_dim=2).any(dim=2).float() # number of times each affordance is present
+        # objectLabel = objectLabel[:,:8] # todo remove
 
 
         logits_mask, r_a__objectLabels, oselm = self.forward(image)
 
-        loss_seg = self.loss_seg(logits_mask, mask)
-        loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
-        loss_reg = self.gamma_R_theta(logits_mask, mask.float())
-        loss = self.alpha * loss_seg + loss_r + loss_reg
+        # loss_seg = self.loss_seg(logits_mask, mask)
+        # loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
+        loss_reg = self.gamma_R_theta(logits_mask, mask)
+        # loss = self.alpha * loss_seg + loss_r + loss_reg
+
+        loss = loss_reg
 
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
@@ -200,9 +195,9 @@ class ZhaoModel(pl.LightningModule):
 
         return {
             "loss": loss,
-            "loss_seg": loss_seg,
-            "loss_r": loss_r,
-            "loss_reg": loss_reg,
+            # "loss_seg": loss_seg.detach(),
+            # "loss_r": loss_r.detach(),
+            "loss_reg": loss_reg.detach(),
             "tp": tp,
             "fp": fp,
             "fn": fn,
@@ -226,8 +221,8 @@ class ZhaoModel(pl.LightningModule):
         tnw = np.array([x["tnw"] for x in outputs]).sum(0)
 
         loss_total = ([x["loss"].item() for x in outputs])
-        loss_seg = ([x["loss_seg"].item() for x in outputs])
-        loss_r = ([x["loss_r"].item() for x in outputs])
+        # loss_seg = ([x["loss_seg"].item() for x in outputs])
+        # loss_r = ([x["loss_r"].item() for x in outputs])
         loss_reg = ([x["loss_reg"].item() for x in outputs])
 
         # aggregate intersection and union over whole dataset and then compute IoU score.
@@ -252,10 +247,11 @@ class ZhaoModel(pl.LightningModule):
 
         per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
         # fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
+        # todo assemble this dict nicer
         metrics = {
             f"{stage}_loss_total": np.mean(loss_total),
-            f"{stage}_loss_seg": np.mean(loss_seg),
-            f"{stage}_loss_r": np.mean(loss_r),
+            # f"{stage}_loss_seg": np.mean(loss_seg),
+            # f"{stage}_loss_r": np.mean(loss_r),
             f"{stage}_loss_reg": np.mean(loss_reg),
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
@@ -268,8 +264,8 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_fbeta_weighted_label_5": fbeta_w[5],
             f"{stage}_fbeta_weighted_label_6": fbeta_w[6],
             f"{stage}_fbeta_weighted_label_7": fbeta_w[7],
-            f"{stage}_fbeta_weighted_label_8": fbeta_w[8],
-            f"{stage}_fbeta_weighted_label_9": fbeta_w[9],
+            # f"{stage}_fbeta_weighted_label_8": fbeta_w[8],
+            # f"{stage}_fbeta_weighted_label_9": fbeta_w[9],
             f"{stage}_iou_none_label_0": per_label_iou_none[0],
             f"{stage}_iou_none_label_1": per_label_iou_none[1],
             f"{stage}_iou_none_label_2": per_label_iou_none[2],
@@ -278,8 +274,8 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_iou_none_label_5": per_label_iou_none[5],
             f"{stage}_iou_none_label_6": per_label_iou_none[6],
             f"{stage}_iou_none_label_7": per_label_iou_none[7],
-            f"{stage}_iou_none_label_8": per_label_iou_none[8],
-            f"{stage}_iou_none_label_9": per_label_iou_none[9]
+            # f"{stage}_iou_none_label_8": per_label_iou_none[8],
+            # f"{stage}_iou_none_label_9": per_label_iou_none[9]
         }
 
         self.log_dict(metrics, prog_bar=True)
@@ -377,12 +373,12 @@ if __name__ == "__main__":
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=2, shuffle=False, num_workers=0)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=2)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=2)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=2)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=2, shuffle=False, num_workers=2)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=2)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=2)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()

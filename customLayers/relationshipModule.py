@@ -35,13 +35,13 @@ class RelationshipAwareModule(nn.Module):
         ### omega c output should be Bs x 10, and represents object labels
         ###################
 
-        cat_in = torch.cat((x.unsqueeze(dim=4),y.unsqueeze(dim=4)), dim=4)
+        x = torch.cat((x.unsqueeze(dim=4),y.unsqueeze(dim=4)), dim=4)
 
         ###
         ## first flatten and then multiplying with weight with same shape works
         ## but is not consistent with method in paper
-        cat_flat = self.flatten(cat_in)
-        # x = self.fc1(cat_flat)
+        x = self.flatten(x)
+        # x = self.fc1(x)
         # x = torch.multiply(x, self.att_w_c) # output size should be BSx128x10, multiply is not correct here probably
         ###
 
@@ -50,7 +50,7 @@ class RelationshipAwareModule(nn.Module):
         # ends up close to correct except it's BS, 10, 32 instead of BS, 10, 128
         # image width and height is different than in paper (32 vs 112) because of dcnn and original image size as well
         # but this doesn't explain how they got to 128 from 112
-        x = torch.tensordot(cat_flat, self.att_w_c)
+        x = torch.tensordot(x, self.att_w_c)
         ###
 
         x = torch.add(x, self.att_b_c)
