@@ -377,12 +377,12 @@ if __name__ == "__main__":
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=0)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0)
+        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=2, shuffle=False, num_workers=0)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=8)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=8)
+        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=2)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=2)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()
