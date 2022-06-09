@@ -7,14 +7,17 @@ class OSELM(nn.Module):
     def __init__(self, dataset):
         super().__init__()
         # elm
-        self.elmPooling = nn.AvgPool2d(56) # is 56 in paper but changed to accomodate resnet input shape
         self.flatten = torch.nn.Flatten(start_dim=1)
-        self.elm1 = nn.Linear(68,1000)
         # self.elm1 = nn.Linear(32, 1000)
         self.relu = torch.nn.LeakyReLU()
         if dataset == 'umd':
+            self.elmPooling = nn.AvgPool2d(16) # is 56 in paper but changed to accomodate resnet input shape
+            # self.elm1 = nn.Linear(272,1000)
             out_features = 17
+            self.elm1 = nn.Linear(16*out_features, 1000)
         elif dataset == 'iitaff':
+            self.elmPooling = nn.AvgPool2d(32)
+            self.elm1 = nn.Linear(40, 1000)
             out_features = 10
         else:
             raise ValueError

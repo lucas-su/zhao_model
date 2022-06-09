@@ -64,8 +64,6 @@ class umd(torch.utils.data.Dataset):
 
         filename = self.filenames[idx]
 
-
-
         image_path = f'{self.root}/tools/{filename}rgb.jpg'
         image = np.array(Image.open(image_path).convert("RGB"))
 

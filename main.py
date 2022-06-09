@@ -3,6 +3,7 @@ import torch
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch.nn as nn
+import gc
 
 import torchvision
 from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
@@ -12,12 +13,21 @@ from pprint import pprint
 from torch.utils.data import DataLoader
 import numpy as np
 
-from torchinfo import summary
+# from torchinfo import summary
 
 import customLayers
 from datasetbuilders import iitaff, sunrgbd, umd
 
 from stat_functions import conf_scores_weighted
+
+def print_memstats():
+    for obj in gc.get_objects():
+        torch.cuda.memory_summary()
+        try:
+            if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                print(type(obj), obj.size())
+        except:
+            pass
 
 class MyResNet(ResNet):
     def __init__(self):
@@ -37,7 +47,12 @@ class MyResNet(ResNet):
 
         x = self.layer1(x)
         x = self.layer2(x)
-        # x = self.layer3(x) # layers disabled because table indicates the dcnn stops at 512 channels
+        """
+        disabling layers 3 and 4 yields input into coordaspp which is closer to zhao 
+        but this also yields memory issues with umd (specifically feature size 17) in relation module 
+        where an FC layer of shape WxHx2xfeature_size is used
+        """
+        x = self.layer3(x)
         # x = self.layer4(x)
         return x
 
@@ -79,8 +94,8 @@ class Encoder(nn.Module):
         # self.model_conv = torchvision.models.vgg16(pretrained=True)
 
         if dcnn == 'resnet50':
-            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer2[-1].bn3.num_features, 256,
-                                                              [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
+            self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer3[-1].bn3.num_features, 256,
+                                                              [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50 todo changed
         elif dcnn == 'resnet18':
             self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer4[-1].bn2.num_features, 256,
                                                               [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50
@@ -113,10 +128,10 @@ class Decoder(nn.Module):
         self.oselm = customLayers.oselm.OSELM(dataset=dataset)
         self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset)
 
-        self.conv4 = nn.Conv2d(nchannels, nchannels, 3) # to n channels for mask output
+        self.conv4 = nn.Conv2d(nchannels, nchannels, 4) # to n channels for mask output, change here if feature map size is larger than nobjects. Change kernel size to 3 for layer 3 and 4 in dcnn
         self.batch_norm_dec = nn.BatchNorm2d(nchannels)
         self.dropout_dec = nn.Dropout()
-        self.upsample_decoder = nn.Upsample(scale_factor=2) # revert to some resolution to see output images
+        self.upsample_decoder = nn.Upsample(scale_factor=4) # revert to some resolution to see output images
 
         # self.lambda_ = torch.ones(nchannels, device=) * 0.1
         self.nchannels = nchannels
@@ -168,19 +183,16 @@ class ZhaoModel(pl.LightningModule):
         h, w = image.shape[2:]
         # assert h % 32 == 0 and w % 32 == 0
         mask = batch["mask"].float()
-        # mask = mask[0:1, 0:8, :] # todo remove
+        # mask = mask[:, 0:14].contiguous()
         objectLabel = batch["object"]
-        # objectLabel = objectLabel[:,:8] # todo remove
-
+        # objectLabel = objectLabel[:,:14].contiguous()
 
         logits_mask, r_a__objectLabels, oselm = self.forward(image)
 
-        # loss_seg = self.loss_seg(logits_mask, mask)
-        # loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
+        loss_seg = self.loss_seg(logits_mask, mask)
+        loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
         loss_reg = self.gamma_R_theta(logits_mask, mask)
-        # loss = self.alpha * loss_seg + loss_r + loss_reg
-
-        loss = loss_reg
+        loss = self.alpha * loss_seg + loss_r + loss_reg
 
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
@@ -195,8 +207,8 @@ class ZhaoModel(pl.LightningModule):
 
         return {
             "loss": loss,
-            # "loss_seg": loss_seg.detach(),
-            # "loss_r": loss_r.detach(),
+            "loss_seg": loss_seg.detach(),
+            "loss_r": loss_r.detach(),
             "loss_reg": loss_reg.detach(),
             "tp": tp,
             "fp": fp,
@@ -221,8 +233,8 @@ class ZhaoModel(pl.LightningModule):
         tnw = np.array([x["tnw"] for x in outputs]).sum(0)
 
         loss_total = ([x["loss"].item() for x in outputs])
-        # loss_seg = ([x["loss_seg"].item() for x in outputs])
-        # loss_r = ([x["loss_r"].item() for x in outputs])
+        loss_seg = ([x["loss_seg"].item() for x in outputs])
+        loss_r = ([x["loss_r"].item() for x in outputs])
         loss_reg = ([x["loss_reg"].item() for x in outputs])
 
         # aggregate intersection and union over whole dataset and then compute IoU score.
@@ -236,51 +248,35 @@ class ZhaoModel(pl.LightningModule):
         fn = fn.sum(0)
         tn = tn.sum(0)
 
+        per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
+        # fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
+
+        metrics = {
+            f"{stage}_loss_total": np.mean(loss_total),
+            f"{stage}_loss_seg": np.mean(loss_seg),
+            f"{stage}_loss_r": np.mean(loss_r),
+            f"{stage}_loss_reg": np.mean(loss_reg),
+            f"{stage}_iou_dataset": dataset_iou,
+            f"{stage}_iou_none": none_iou,
+        }
         fbeta_w = []
-        for tpw_i, fpw_i, fnw_i, tnw_i in zip(tpw, fpw, fnw, tnw):
+        for i, iou in enumerate(per_label_iou_none):
+            metrics[f"{stage}_iou_none_label_{i}"] = iou
+        for i, (tpw_i, fpw_i, fnw_i, tnw_i) in enumerate(zip(tpw, fpw, fnw, tnw)):
             beta = 1
             R = tpw_i/(fnw_i + tpw_i)
             P = tpw_i/(fpw_i + tpw_i)
             eps = np.spacing(1)
             Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
             fbeta_w.append(Q)
+            metrics[f"{stage}_fbeta_weighted_label_{i}"] = Q
 
-        per_label_iou_none = smp.metrics.iou_score(tp, fp, fn, tn, reduction=None)
-        # fbeta_mean = np.mean(list(per_label_fbeta_none.cpu()))
-        # todo assemble this dict nicer
-        metrics = {
-            f"{stage}_loss_total": np.mean(loss_total),
-            # f"{stage}_loss_seg": np.mean(loss_seg),
-            # f"{stage}_loss_r": np.mean(loss_r),
-            f"{stage}_loss_reg": np.mean(loss_reg),
-            f"{stage}_iou_dataset": dataset_iou,
-            f"{stage}_iou_none": none_iou,
-            f"{stage}_fbeta_weighted_mean": np.mean(fbeta_w),
-            f"{stage}_fbeta_weighted_label_0": fbeta_w[0],
-            f"{stage}_fbeta_weighted_label_1": fbeta_w[1],
-            f"{stage}_fbeta_weighted_label_2": fbeta_w[2],
-            f"{stage}_fbeta_weighted_label_3": fbeta_w[3],
-            f"{stage}_fbeta_weighted_label_4": fbeta_w[4],
-            f"{stage}_fbeta_weighted_label_5": fbeta_w[5],
-            f"{stage}_fbeta_weighted_label_6": fbeta_w[6],
-            f"{stage}_fbeta_weighted_label_7": fbeta_w[7],
-            # f"{stage}_fbeta_weighted_label_8": fbeta_w[8],
-            # f"{stage}_fbeta_weighted_label_9": fbeta_w[9],
-            f"{stage}_iou_none_label_0": per_label_iou_none[0],
-            f"{stage}_iou_none_label_1": per_label_iou_none[1],
-            f"{stage}_iou_none_label_2": per_label_iou_none[2],
-            f"{stage}_iou_none_label_3": per_label_iou_none[3],
-            f"{stage}_iou_none_label_4": per_label_iou_none[4],
-            f"{stage}_iou_none_label_5": per_label_iou_none[5],
-            f"{stage}_iou_none_label_6": per_label_iou_none[6],
-            f"{stage}_iou_none_label_7": per_label_iou_none[7],
-            # f"{stage}_iou_none_label_8": per_label_iou_none[8],
-            # f"{stage}_iou_none_label_9": per_label_iou_none[9]
-        }
+        metrics[f"{stage}_fbeta_weighted_mean"] = np.mean(fbeta_w)
 
         self.log_dict(metrics, prog_bar=True)
 
     def training_step(self, batch, batch_idx):
+        torch.cuda.empty_cache()
         return self.shared_step(batch, "train")
 
     def training_epoch_end(self, outputs):
@@ -373,16 +369,16 @@ if __name__ == "__main__":
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=2)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=2)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=8)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=8)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=2)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=2)
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=2)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=2)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()
-    summary(model)
+    # summary(model)
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
             gpus=1,
