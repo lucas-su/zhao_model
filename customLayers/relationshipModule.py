@@ -16,9 +16,11 @@ class RelationshipAwareModule(nn.Module):
         self.batchnorm1 = nn.BatchNorm2d(1) # batch norm 1???
         self.dropout = nn.Dropout()
 
-        self.att_w_c = nn.Parameter(torch.ones(self.out_features,8192,self.out_features,128)) # from 2048 changed after input resize
-        self.att_b_c = nn.Parameter(torch.zeros(self.out_features,128))
-        self.att_w_i = nn.Parameter(torch.ones(self.out_features, 128,self.out_features))
+        n_intermediate_features = 64 # is 128 in paper
+
+        self.att_w_c = nn.Parameter(torch.ones(self.out_features,8192,self.out_features,n_intermediate_features))
+        self.att_b_c = nn.Parameter(torch.zeros(self.out_features,n_intermediate_features))
+        self.att_w_i = nn.Parameter(torch.ones(self.out_features, n_intermediate_features,self.out_features))
         self.att_b_i = nn.Parameter(torch.zeros(self.out_features))
 
         self.flatten = torch.nn.Flatten(start_dim=2)
