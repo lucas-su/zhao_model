@@ -174,6 +174,7 @@ class ZhaoModel(pl.LightningModule):
         return mask, r_a__objectLabels, oselm
 
     def shared_step(self, batch, stage):
+        print(torch.cuda.memory_allocated())
         image = batch["image"]
 
         # Shape of the image should be (batch_size, num_channels, height, width)
@@ -371,12 +372,12 @@ if __name__ == "__main__":
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=8)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=8)
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=8)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=8)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=2, shuffle=False, num_workers=8)
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=8)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()
@@ -388,7 +389,7 @@ if __name__ == "__main__":
         )
     else:
         trainer = pl.Trainer(
-            gpus=1,
+            gpus=torch.cuda.device_count(),
             max_epochs=15,
         )
 
