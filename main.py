@@ -264,9 +264,9 @@ class ZhaoModel(pl.LightningModule):
             metrics[f"{stage}_iou_none_label_{i}"] = iou
         for i, (tpw_i, fpw_i, fnw_i, tnw_i) in enumerate(zip(tpw, fpw, fnw, tnw)):
             beta = 1
-            R = tpw_i/(fnw_i + tpw_i)
-            P = tpw_i/(fpw_i + tpw_i)
             eps = np.spacing(1)
+            R = tpw_i/(fnw_i + tpw_i + eps)
+            P = tpw_i/(fpw_i + tpw_i + eps)
             Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
             fbeta_w.append(Q)
             metrics[f"{stage}_fbeta_weighted_label_{i}"] = Q
@@ -373,8 +373,8 @@ if __name__ == "__main__":
         valid_dataloader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=8)
         # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=2)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=2)
+        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=16)
         # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()
