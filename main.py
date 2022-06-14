@@ -220,6 +220,7 @@ class ZhaoModel(pl.LightningModule):
         }
 
     def shared_epoch_end(self, outputs, stage):
+
         # aggregate step metics
         tp = torch.cat([x["tp"] for x in outputs]).long()
         fp = torch.cat([x["fp"] for x in outputs]).long()
@@ -387,7 +388,7 @@ if __name__ == "__main__":
         )
     else:
         trainer = pl.Trainer(
-            gpus=torch.cuda.device_count(),
+            gpus=1,
             max_epochs=15,
         )
 
