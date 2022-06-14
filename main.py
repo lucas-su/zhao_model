@@ -301,9 +301,7 @@ if __name__ == "__main__":
 
     args = dict(arg.split("=") for arg in sys.argv[1:])
 
-    print("device names: ")
-    torch.cuda.get_device_name(0)
-    torch.cuda.get_device_name(1)
+    print(f"device names: {[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}")
 
     if "dataset" in args.keys():
         dataset = args["dataset"] # options 'sunrgbd' 'iitaff' 'umd'
