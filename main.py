@@ -20,11 +20,13 @@ from datasetbuilders import iitaff, sunrgbd, umd
 
 from stat_functions import conf_scores_weighted
 
-def print_memstats():
+def print_memstats(location = None):
     for obj in gc.get_objects():
         torch.cuda.memory_summary()
         try:
             if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                if location:
+                    print(f"Memstats at {location}")
                 print(type(obj), obj.size())
         except:
             pass
@@ -89,10 +91,6 @@ class Encoder(nn.Module):
             for param in self.model_conv.parameters():
                 param.requires_grad = False
 
-        # self.model_conv = torchvision.models.alexnet(pretrained=True)
-        # self.model_conv = torchvision.models.squeezenet1_0(pretrained=True)
-        # self.model_conv = torchvision.models.vgg16(pretrained=True)
-
         if dcnn == 'resnet50':
             self.coordASPP = customLayers.CoordASPP.CoordASPP(self.model_conv.layer3[-1].bn3.num_features, 256,
                                                               [1, 2, 3, 6])  # 512 for resnet18, 2048 for resnet50 todo changed
@@ -111,15 +109,16 @@ class Encoder(nn.Module):
         self.relu_enc = torch.nn.ReLU()
 
     def forward(self, x):
-        cnnblock = self.model_conv(x)
-        coordaspp = self.coordASPP(cnnblock)
+        x = self.model_conv(x)
+        x = self.coordASPP(x)
 
-        upsampled = self.upsample_encoder(coordaspp)
-        encoder = self.rescale_conv(upsampled)
-        encoder = self.batch_norm_enc(encoder)
-        encoder = self.relu_enc(encoder)
-        encoder = self.dropout_enc(encoder)
-        return encoder
+        x = self.upsample_encoder(x)
+        x = self.rescale_conv(x)
+        x = self.batch_norm_enc(x)
+        x = self.relu_enc(x)
+        x = self.dropout_enc(x)
+        # print_memstats('encoder forward')
+        return x
 
 class Decoder(nn.Module):
     def __init__(self, dataset, nchannels):
@@ -133,7 +132,6 @@ class Decoder(nn.Module):
         self.dropout_dec = nn.Dropout()
         self.upsample_decoder = nn.Upsample(scale_factor=4) # revert to some resolution to see output images
 
-        # self.lambda_ = torch.ones(nchannels, device=) * 0.1
         self.nchannels = nchannels
 
     def forward(self, x):
@@ -148,6 +146,7 @@ class Decoder(nn.Module):
         x = self.dropout_dec(x)
         x = torch.relu(x)
         x = self.upsample_decoder(x)
+        # print_memstats('decoder forward')
         return x, r_a__objectLabels, oselm
 
 class ZhaoModel(pl.LightningModule):
@@ -166,7 +165,6 @@ class ZhaoModel(pl.LightningModule):
         self.gamma_R_theta = torch.nn.MSELoss()
         self.alpha = 10
 
-
     def forward(self, image):
         image = image.float()
         x = self.encoder(image)
@@ -183,7 +181,7 @@ class ZhaoModel(pl.LightningModule):
         h, w = image.shape[2:]
         # assert h % 32 == 0 and w % 32 == 0
         mask = batch["mask"].float()
-        # mask = mask[:, 0:14].contiguous()
+        # mask = mask[:, 0:14].contiguous() # for use with fewer channels than objects
         objectLabel = batch["object"]
         # objectLabel = objectLabel[:,:14].contiguous()
 
@@ -199,10 +197,11 @@ class ZhaoModel(pl.LightningModule):
         for b in range(masksize[0]):
             for i in range(masksize[1]):
                 weighted_conf_metrics[b][i] = conf_scores_weighted(logits_mask[b][i], mask[b][i])
-        # prob_mask = logits_mask.sigmoid()
+        logits_mask = logits_mask.sigmoid()
+        # pred_mask = prob_mask
         pred_mask = (logits_mask > 0.5).float()
 
-        # tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="binary")
+
         tp, fp, fn, tn = smp.metrics.get_stats(pred_mask.long(), mask.long(), mode="multilabel")
 
         return {
