@@ -16,7 +16,7 @@ class RelationshipAwareModule(nn.Module):
         self.batchnorm1 = nn.BatchNorm2d(1) # batch norm 1???
         self.dropout = nn.Dropout()
 
-        n_intermediate_features = 8 # is 128 in paper
+        n_intermediate_features = 64 # is 128 in paper
 
         self.att_w_c = nn.Parameter(torch.ones(self.out_features,8192,self.out_features,n_intermediate_features))
         self.att_b_c = nn.Parameter(torch.zeros(self.out_features,n_intermediate_features))
