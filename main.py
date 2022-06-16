@@ -121,16 +121,16 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dataset, nchannels):
+    def __init__(self, dataset, nchannels, noutputs):
         super().__init__()
         # decoder after relation and elm
         self.oselm = customLayers.oselm.OSELM(dataset=dataset)
         self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset)
 
-        self.conv4 = nn.Conv2d(nchannels, nchannels, 4) # to n channels for mask output, change here if feature map size is larger than nobjects. Change kernel size to 3 for layer 3 and 4 in dcnn
-        self.batch_norm_dec = nn.BatchNorm2d(nchannels)
+        self.conv4 = nn.Conv2d(nchannels, noutputs, 4) # to n channels for mask output, change here if feature map size is larger than nobjects. Change kernel size to 3 for layer 3 and 4 in dcnn
+        self.batch_norm_dec = nn.BatchNorm2d(noutputs)
         self.dropout_dec = nn.Dropout()
-        self.upsample_decoder = nn.Upsample(scale_factor=4) # revert to some resolution to see output images
+        self.upsample_decoder = nn.Upsample(scale_factor=4) # revert to same resolution as mask
 
         self.nchannels = nchannels
 
@@ -155,10 +155,12 @@ class ZhaoModel(pl.LightningModule):
         super().__init__()
         if dataset == 'umd':
             self.nchannels = 17
+            self.noutputs = 7
         elif dataset == 'iitaff':
             self.nchannels = 10
+            self.noutputs = 10
         self.encoder = Encoder(dcnn, self.nchannels)
-        self.decoder = Decoder(dataset, self.nchannels)
+        self.decoder = Decoder(dataset, self.nchannels, self.noutputs)
 
         self.loss_seg = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.loss_r_aware = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
@@ -194,7 +196,7 @@ class ZhaoModel(pl.LightningModule):
         loss = self.alpha * loss_seg + loss_r + loss_reg
 
         masksize = logits_mask.size()
-        weighted_conf_metrics = np.zeros((masksize[0], masksize[1],4))
+        weighted_conf_metrics = np.zeros((masksize[0], masksize[1],5))
         for b in range(masksize[0]):
             for i in range(masksize[1]):
                 weighted_conf_metrics[b][i] = conf_scores_weighted(logits_mask[b][i], mask[b][i])
@@ -218,6 +220,7 @@ class ZhaoModel(pl.LightningModule):
             "fpw": weighted_conf_metrics.sum(0).T[1],
             "tnw": weighted_conf_metrics.sum(0).T[2],
             "fnw": weighted_conf_metrics.sum(0).T[3],
+            "q": np.nanmean(weighted_conf_metrics, axis=0).T[4]
         }
 
     def shared_epoch_end(self, outputs, stage):
@@ -232,6 +235,7 @@ class ZhaoModel(pl.LightningModule):
         fpw = np.array([x["fpw"] for x in outputs]).sum(0)
         fnw = np.array([x["fnw"] for x in outputs]).sum(0)
         tnw = np.array([x["tnw"] for x in outputs]).sum(0)
+        q_alt = np.nanmean(np.array([x["q"] for x in outputs]), axis=0)
 
         loss_total = ([x["loss"].item() for x in outputs])
         loss_seg = ([x["loss_seg"].item() for x in outputs])
@@ -271,6 +275,8 @@ class ZhaoModel(pl.LightningModule):
             Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
             fbeta_w.append(Q)
             metrics[f"{stage}_fbeta_weighted_label_{i}"] = Q
+            # include alternative q per image
+            metrics[f"{stage}_fbeta_alt_weighted_label_{i}"] = q_alt[i]
 
         metrics[f"{stage}_fbeta_weighted_mean"] = np.mean(fbeta_w)
 

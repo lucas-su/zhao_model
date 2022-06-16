@@ -86,16 +86,17 @@ def conf_scores_weighted(candidate, gt, beta=1.0):
     # Final metric computation
     eps = np.spacing(1)
     TPw = np.sum(gt) - np.sum(Ew[gt_mask])
-    FPw = np.sum(Ew[not_gt_mask])
     TNw = (1-np.sum(Ew[gt_mask]))*(1-np.sum(gt))
+
+    FPw = np.sum(Ew[not_gt_mask])
     FNw = np.sum(Ew[gt_mask]) * np.sum(gt)
-    # if gt_mask.any():
-    #     R = 1 - np.mean(Ew[gt_mask])  # Weighed Recall
-    # else:
-    #     R = 0
-    # P = TPw / (eps + TPw + FPw)  # Weighted Precision
+    if gt_mask.any():
+        R = 1 - np.mean(Ew[gt_mask])  # Weighed Recall
+        P = TPw / (eps + TPw + FPw)  # Weighted Precision
+        Q = (1 + beta**2) * (R * P) / (eps + R + (beta * P))
+    else:
+        Q = np.nan
 
     # Q = 2 * (R * P) / (eps + R + P)  # Beta=1
-    # Q = (1 + beta**2) * (R * P) / (eps + R + (beta * P)) # return TPw and FPw and calculate Q over entire epoch
 
-    return TPw, FPw, TNw, FNw
+    return TPw, FPw, TNw, FNw, Q
