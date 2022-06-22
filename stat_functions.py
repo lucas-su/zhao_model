@@ -85,11 +85,15 @@ def conf_scores_weighted(candidate, gt, beta=1.0):
 
     # Final metric computation
     eps = np.spacing(1)
-    TPw = np.sum(gt) - np.sum(Ew[gt_mask])
-    TNw = (1-np.sum(Ew[gt_mask]))*(1-np.sum(gt))
 
+    TPw = np.sum(gt) - np.sum(Ew[gt_mask])
+    TNw = sum(sum((1-Ew)*(1-gt)))
     FPw = np.sum(Ew[not_gt_mask])
-    FNw = np.sum(Ew[gt_mask]) * np.sum(gt)
+    FNw = np.sum(Ew[gt_mask])
+
+    # compute total to check numbers
+    # tot = TPw + TNw + FPw + FNw
+
     if gt_mask.any():
         R = 1 - np.mean(Ew[gt_mask])  # Weighed Recall
         P = TPw / (eps + TPw + FPw)  # Weighted Precision

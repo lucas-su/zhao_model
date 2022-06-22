@@ -4,8 +4,20 @@ import torch
 
 
 class OSELM(nn.Module):
-    def __init__(self, dataset):
+    def __init__(self, dataset, norm, dropout, activation):
         super().__init__()
+        if norm:
+            self.use_norm = True
+        else:
+            self.use_norm = False
+        if dropout:
+            self.use_dropout = True
+        else:
+            self.use_dropout = False
+        if activation:
+            self.use_activation = True
+        else:
+            self.use_activation = False
         # elm
         self.flatten = torch.nn.Flatten(start_dim=1)
         # self.elm1 = nn.Linear(32, 1000)
@@ -29,7 +41,8 @@ class OSELM(nn.Module):
         x = self.flatten(x)
         # print(x.shape)
         x = self.elm1(x)
-        x = self.relu(x)
+        if self.use_activation:
+            x = self.relu(x)
         x = self.elm2(x)
 
         return x

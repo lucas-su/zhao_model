@@ -17,7 +17,7 @@ import numpy as np
 
 import customLayers
 from datasetbuilders import iitaff, sunrgbd, umd
-
+from arg_interpret import arg_int
 from stat_functions import conf_scores_weighted
 
 def print_memstats(location = None):
@@ -52,7 +52,8 @@ class MyResNet(ResNet):
         """
         disabling layers 3 and 4 yields input into coordaspp which is closer to zhao 
         but this also yields memory issues with umd (specifically feature size 17) in relation module 
-        where an FC layer of shape WxHx2xfeature_size is used
+        where an FC layer of shape WxHx2xfeature_size is used. Only disabling layer 4 is a compromise, still close
+        to the shape described in the paper, and with fewer memory issues
         """
         x = self.layer3(x)
         # x = self.layer4(x)
@@ -114,9 +115,12 @@ class Encoder(nn.Module):
 
         x = self.upsample_encoder(x)
         x = self.rescale_conv(x)
-        x = self.batch_norm_enc(x)
-        x = self.relu_enc(x)
-        x = self.dropout_enc(x)
+        if norm:
+            x = self.batch_norm_enc(x)
+        if activation:
+            x = self.relu_enc(x)
+        if dropout:
+            x = self.dropout_enc(x)
         # print_memstats('encoder forward')
         return x
 
@@ -124,8 +128,8 @@ class Decoder(nn.Module):
     def __init__(self, dataset, nchannels, noutputs):
         super().__init__()
         # decoder after relation and elm
-        self.oselm = customLayers.oselm.OSELM(dataset=dataset)
-        self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset)
+        self.oselm = customLayers.oselm.OSELM(dataset=dataset, norm=norm, dropout=dropout, activation=activation )
+        self.relation = customLayers.relationshipModule.RelationshipAwareModule(dataset=dataset, norm=norm, dropout=dropout, activation=activation)
 
         self.conv4 = nn.Conv2d(nchannels, noutputs, 4) # to n channels for mask output, change here if feature map size is larger than nobjects. Change kernel size to 3 for layer 3 and 4 in dcnn
         self.batch_norm_dec = nn.BatchNorm2d(noutputs)
@@ -138,13 +142,16 @@ class Decoder(nn.Module):
         oselm = self.oselm(x)
         omega_oselm = torch.mul(oselm, torch.ones(x.shape[1], device=oselm.device) * 0.1) # use mul here becuase lambda_ is scalar
         r_a__objectLabels = self.relation(x)
-        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.nchannels).to("cuda"))
+        Wfusion = torch.add(omega_oselm, r_a__objectLabels).add(torch.ones(self.nchannels).to(omega_oselm.device))
         Wfusion = Wfusion.unsqueeze(2).unsqueeze(3)
         x = torch.multiply(x,Wfusion)
         x = self.conv4(x)
-        x = self.batch_norm_dec(x)
-        x = self.dropout_dec(x)
-        x = torch.relu(x)
+        if norm:
+            x = self.batch_norm_dec(x)
+        if dropout:
+            x = self.dropout_dec(x)
+        if activation:
+            x = torch.relu(x)
         x = self.upsample_decoder(x)
         # print_memstats('decoder forward')
         return x, r_a__objectLabels, oselm
@@ -155,7 +162,7 @@ class ZhaoModel(pl.LightningModule):
         super().__init__()
         if dataset == 'umd':
             self.nchannels = 17
-            self.noutputs = 7
+            self.noutputs = 8
         elif dataset == 'iitaff':
             self.nchannels = 10
             self.noutputs = 10
@@ -164,7 +171,7 @@ class ZhaoModel(pl.LightningModule):
 
         self.loss_seg = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
         self.loss_r_aware = smp.losses.FocalLoss(smp.losses.MULTILABEL_MODE, gamma=1)
-        self.gamma_R_theta = torch.nn.MSELoss()
+
         self.alpha = 10
 
     def forward(self, image):
@@ -176,7 +183,7 @@ class ZhaoModel(pl.LightningModule):
         return mask, r_a__objectLabels, oselm
 
     def shared_step(self, batch, stage):
-        print(torch.cuda.memory_allocated())
+        # print(torch.cuda.memory_allocated())
         image = batch["image"]
 
         # Shape of the image should be (batch_size, num_channels, height, width)
@@ -192,8 +199,15 @@ class ZhaoModel(pl.LightningModule):
 
         loss_seg = self.loss_seg(logits_mask, mask)
         loss_r = self.loss_r_aware(r_a__objectLabels, objectLabel)
-        loss_reg = self.gamma_R_theta(logits_mask, mask)
-        loss = self.alpha * loss_seg + loss_r + loss_reg
+        l2_lambda = 0.00000001
+        # l2_reg = torch.tensor(0., device="cuda")
+        l2_reg = 0
+        for param in model.parameters():
+            if param.requires_grad:
+                l2_reg += torch.linalg.norm(param)**2
+        loss_reg = (l2_lambda * l2_reg)
+        # loss_reg = l2_reg
+        loss = self.alpha * loss_seg + loss_r + loss_reg # reg implemented in adam function instead of manually
 
         masksize = logits_mask.size()
         weighted_conf_metrics = np.zeros((masksize[0], masksize[1],5))
@@ -211,7 +225,7 @@ class ZhaoModel(pl.LightningModule):
             "loss": loss,
             "loss_seg": loss_seg.detach(),
             "loss_r": loss_r.detach(),
-            "loss_reg": loss_reg.detach(),
+            # "loss_reg": loss_reg.detach(),
             "tp": tp,
             "fp": fp,
             "fn": fn,
@@ -235,12 +249,12 @@ class ZhaoModel(pl.LightningModule):
         fpw = np.array([x["fpw"] for x in outputs]).sum(0)
         fnw = np.array([x["fnw"] for x in outputs]).sum(0)
         tnw = np.array([x["tnw"] for x in outputs]).sum(0)
-        q_alt = np.nanmean(np.array([x["q"] for x in outputs]), axis=0)
+        q_macro = np.nanmean(np.array([x["q"] for x in outputs]), axis=0)
 
         loss_total = ([x["loss"].item() for x in outputs])
         loss_seg = ([x["loss_seg"].item() for x in outputs])
         loss_r = ([x["loss_r"].item() for x in outputs])
-        loss_reg = ([x["loss_reg"].item() for x in outputs])
+        # loss_reg = ([x["loss_reg"].item() for x in outputs])
 
         # aggregate intersection and union over whole dataset and then compute IoU score.
         # images without some target influence per_image_iou more than dataset_iou.
@@ -260,7 +274,7 @@ class ZhaoModel(pl.LightningModule):
             f"{stage}_loss_total": np.mean(loss_total),
             f"{stage}_loss_seg": np.mean(loss_seg),
             f"{stage}_loss_r": np.mean(loss_r),
-            f"{stage}_loss_reg": np.mean(loss_reg),
+            # f"{stage}_loss_reg": np.mean(loss_reg),
             f"{stage}_iou_dataset": dataset_iou,
             f"{stage}_iou_none": none_iou,
         }
@@ -275,8 +289,8 @@ class ZhaoModel(pl.LightningModule):
             Q = (1 + beta ** 2) * (R * P) / (eps + R + (beta * P))
             fbeta_w.append(Q)
             metrics[f"{stage}_fbeta_weighted_label_{i}"] = Q
-            # include alternative q per image
-            metrics[f"{stage}_fbeta_alt_weighted_label_{i}"] = q_alt[i]
+            # include macro averaged q per image
+            metrics[f"{stage}_fbeta_macro_weighted_label_{i}"] = q_macro[i]
 
         metrics[f"{stage}_fbeta_weighted_mean"] = np.mean(fbeta_w)
 
@@ -302,6 +316,7 @@ class ZhaoModel(pl.LightningModule):
         return self.shared_epoch_end(outputs, "test")
 
     def configure_optimizers(self):
+        # return torch.optim.Adam(self.parameters(), lr=0.0001, weight_decay=1*10**-8)
         return torch.optim.Adam(self.parameters(), lr=0.0001)
 
 
@@ -311,29 +326,7 @@ if __name__ == "__main__":
 
     print(f"device names: {[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}")
 
-    if "dataset" in args.keys():
-        dataset = args["dataset"] # options 'sunrgbd' 'iitaff' 'umd'
-    else:
-        print("using default dataset sunrgbd")
-        dataset = 'sunrgbd'
-
-    if "dcnn_type" in args.keys():
-        dcnn = args["dcnn_type"] # options 'resnet50' 'resnet18' 'vgg'
-    else:
-        print("using default dcnn type resnet50")
-        dcnn = "resnet50"
-
-    if "train_test_mode" in args.keys():
-        test_test_mode = args["train_test_mode"] # options 'train' 'test'
-    else:
-        print("training network by default")
-        test_test_mode = 'train'
-
-    if "train_dcnn" in args.keys():
-        train_dcnn = True if args["train_dcnn"].lower() == 'true' else False # options true, false
-    else:
-        print("training dcnn layers by default")
-        train_dcnn = True
+    dataset, dcnn, train_test_mode, train_dcnn, use_gpu, norm, dropout, activation = arg_int(args)
 
     if dataset == 'sunrgbd':
         if os.path.exists("devmode"):
@@ -361,45 +354,45 @@ if __name__ == "__main__":
             root = "/home/schootuiterkampl/part-affordance-dataset"
 
         train_dataset = umd.umd(root, "train")
-        valid_dataset = umd.umd(root, "test") ##################### valid == test because umd does not provide valid set
-        # test_dataset = umd.umd(root, "test")
+        valid_dataset = umd.umd(root, "valid")
+        test_dataset = umd.umd(root, "test")
 
     else:
         raise ValueError
 
-    # assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
-    # assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames)) #disable for umd
+    assert set(test_dataset.filenames).isdisjoint(set(train_dataset.filenames))
+    assert set(test_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
     assert set(train_dataset.filenames).isdisjoint(set(valid_dataset.filenames))
 
     print(f"Train size: {len(train_dataset)}")
     print(f"Valid size: {len(valid_dataset)}")
-    # print(f"Test size: {len(test_dataset)}")
+    print(f"Test size: {len(test_dataset)}")
 
     n_cpu = os.cpu_count()
 
     if os.path.exists("devmode"):
-        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=8)
-        # test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=4)
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=n_cpu)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=n_cpu)
+        test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=n_cpu)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=8)
-        # test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
+        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=16)
+        test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
 
     model = ZhaoModel()
     # summary(model)
     if os.path.exists("devmode"):
         trainer = pl.Trainer(
-            gpus=1,
+            gpus=(torch.cuda.device_count() if use_gpu else 0),
             max_epochs=15,
         )
     else:
         trainer = pl.Trainer(
-            gpus=torch.cuda.device_count(),
+            gpus=(torch.cuda.device_count() if use_gpu else 0),
             max_epochs=15,
         )
 
-    if test_test_mode == 'train':
+    if train_test_mode == 'train':
         trainer.fit(
             model,
             train_dataloaders=train_dataloader,
@@ -413,7 +406,7 @@ if __name__ == "__main__":
     pprint(valid_metrics)
 
     # run test dataset
-    # test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
-    # pprint(test_metrics)
+    test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
+    pprint(test_metrics)
 
     torch.save(model.state_dict(), f'{dataset}_{dcnn}_{"dcnn-trained" if train_dcnn else "dcnn-untrained"}_model_state_dict')

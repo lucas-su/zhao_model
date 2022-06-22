@@ -29,8 +29,9 @@ class umd(torch.utils.data.Dataset):
         self.images_directories = []
         train_filenames = []
         test_filenames = []
+        val_filenames = []
 
-        with open(f'{root}/category_split.txt', 'r') as file:
+        with open(f'{root}/category_split_w_test.txt', 'r') as file:
             splits = file.read().split('\n')
         splits.remove("")
 
@@ -44,15 +45,16 @@ class umd(torch.utils.data.Dataset):
             r = re.compile(f".*^{row[1]}.*rgb\.jpg")
             if int(row[0]) == 1:
                 train_filenames.extend([file[:-7] for file in list(filter(r.match, names_per_object))])
-            else:
+            elif int(row[0]) == 2:
                 test_filenames.extend([file[:-7] for file in list(filter(r.match, names_per_object))])
-
+            else:
+                val_filenames.extend([file[:-7] for file in list(filter(r.match, names_per_object))])
         if mode == 'train':
             self.filenames = train_filenames
         elif mode == 'test':
             self.filenames = test_filenames
-        # elif mode == 'valid':
-        #     self.filenames = val_filenames
+        elif mode == 'valid':
+            self.filenames = val_filenames
         else:
             raise ValueError('file loading error: define mode failed')
 
@@ -65,7 +67,7 @@ class umd(torch.utils.data.Dataset):
         filename = self.filenames[idx]
 
         image_path = f'{self.root}/tools/{filename}rgb.jpg'
-        image = np.array(Image.open(image_path).convert("RGB"))
+        image = np.array(Image.open(image_path).__array__())
 
         # depth_path = f'{self.root}/tools/all/{filename[:-4]}.txt'
         # with open(depth_path) as file:
@@ -78,11 +80,6 @@ class umd(torch.utils.data.Dataset):
         f = loadmat(mask_path)
         mask = f['gt_label']
 
-        # with open(mask_path) as file:
-        #     raw_mask = file.read().split('\n')
-        # raw_mask.remove("")
-        # mask = np.array([np.array(row.split(' '), dtype=float) for row in raw_mask])
-
         all_objects = ["knife", "saw", "scissors", "shears", "scoop", "spoon", "trowel", "bowl", "cup", "ladle",
                        "mug", "pot", "shovel", "turner", "hammer", "mallet", "tenderizer"]
 
@@ -94,9 +91,7 @@ class umd(torch.utils.data.Dataset):
 
         assert current_obj != ""
 
-
-        sample = dict(image=image, mask=mask, object=current_obj)
-
+        # crop to center 244 x 244 pixels
         left = int((image.shape[0]-244)/2)
         right = image.shape[0]-left
         top = int((image.shape[1]-244)/2)
@@ -105,17 +100,15 @@ class umd(torch.utils.data.Dataset):
         image = image[left:right, top:bottom, :]
         mask = mask[left:right, top:bottom]
 
-        # image = np.array(Image.fromarray(sample["image"]).resize((244, 244), Image.LINEAR))
-        # mask = np.array(Image.fromarray(sample["mask"]).resize((244, 244), Image.LINEAR))
-        # depth = np.array(Image.fromarray(sample["depth"]).resize((244, 244), Image.NEAREST))
-
-        mask = to_cat(mask, 8)[:,:,1:]
+        # mask = to_cat(mask, 8)[:,:,1:] #exclude background as feature, in paper background is included as feature
+        mask = to_cat(mask, 8)
 
         object = to_cat(current_obj, 17)
         # if object.shape[0] > 1:
         #     object = [sum(object)]
         # object encodes the number of times each affordance is represented in each image. relationship aware module learns this
 
+        sample = dict(image=image, mask=mask, object=current_obj)
         # convert to other format HWC -> CHW
         sample["image"] = np.moveaxis(image, -1, 0)
         sample["mask"] =  np.moveaxis(mask, -1, 0)
