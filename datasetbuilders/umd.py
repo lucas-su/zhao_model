@@ -67,7 +67,7 @@ class umd(torch.utils.data.Dataset):
         filename = self.filenames[idx]
 
         image_path = f'{self.root}/tools/{filename}rgb.jpg'
-        image = np.array(Image.open(image_path).__array__())
+        image = np.array(Image.open(image_path)) # .__array__() removed as this gives error on server when training on cpu (don't know why)
 
         # depth_path = f'{self.root}/tools/all/{filename[:-4]}.txt'
         # with open(depth_path) as file:
