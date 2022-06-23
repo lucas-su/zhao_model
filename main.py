@@ -9,7 +9,7 @@ import torchvision
 from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 from torchvision.models.vgg import VGG, make_layers
 
-from pprint import pprint
+from pprint import pprint, pformat
 from torch.utils.data import DataLoader
 import numpy as np
 
@@ -409,4 +409,16 @@ if __name__ == "__main__":
     test_metrics = trainer.test(model, dataloaders=test_dataloader, verbose=True)
     pprint(test_metrics)
 
-    torch.save(model.state_dict(), f'{dataset}_{dcnn}_{"dcnn-trained" if train_dcnn else "dcnn-untrained"}_model_state_dict')
+    name_template = f'{dataset}_{dcnn}-{"trained" if train_dcnn else "frozen"}_' \
+                    f'{"GPU" if use_gpu else "CPU"}_'\
+                    f'{"BNorm" if norm else "no-BNorm"}_'\
+                    f'{"Dropout" if dropout else "no-Dropout"}_'\
+                    f'{"Activation" if activation else "no-Activation"}'
+
+    torch.save(model.state_dict(), f'{name_template}_model_state_dict')
+
+
+    with open(f'{name_template}_metrics.txt', 'w') as file:
+        file.write(pformat(valid_metrics))
+        file.write(pformat(test_metrics))
+
