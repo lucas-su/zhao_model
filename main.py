@@ -375,10 +375,10 @@ if __name__ == "__main__":
         valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=n_cpu)
         test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=n_cpu)
     else:
-        train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16)
-        valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=False, num_workers=16)
-        test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=n_cpu)
-
+        train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=16)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=16)
+        test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=n_cpu)
+etric savingetric saving
     model = ZhaoModel()
     # summary(model)
     if os.path.exists("devmode"):
